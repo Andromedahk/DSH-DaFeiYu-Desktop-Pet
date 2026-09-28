@@ -175,8 +175,15 @@ final class PetController: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         // NSView.hitTest alone cannot pass an event through an entire window.
         // Polling the pointer needs no global input-monitoring permission.
-        let point = view.convert(window.convertPoint(fromScreen: NSEvent.mouseLocation), from: nil)
-        window.ignoresMouseEvents = !isMenuTracking && !view.isDragging && !view.containsInteractivePoint(point)
+        // AppKit owns event routing while tracking a menu and its submenus.
+        // Do not touch the host window's mouse routing in that nested run loop.
+        if !isMenuTracking {
+            let point = view.convert(window.convertPoint(fromScreen: NSEvent.mouseLocation), from: nil)
+            let ignoresMouse = !view.isDragging && !view.containsInteractivePoint(point)
+            if window.ignoresMouseEvents != ignoresMouse {
+                window.ignoresMouseEvents = ignoresMouse
+            }
+        }
         if credential != nil { poll(snap: false) }
 
         statusAccum += dt
@@ -292,6 +299,7 @@ final class PetController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         boxes.removeAll()
         let menu = NSMenu()
         menu.autoenablesItems = false
+        menu.delegate = self
 
         func item(_ title: String, _ enabled: Bool = true, _ handler: @escaping () -> Void) -> NSMenuItem {
             let box = ActionBox(handler)
@@ -327,7 +335,9 @@ final class PetController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(item("测试一次扣费") { [weak self] in self?.model.playOneHit() })
 
         let demo = NSMenuItem(title: "演示连续扣费", action: nil, keyEquivalent: "")
-        let demoMenu = NSMenu()
+        let demoMenu = NSMenu(title: demo.title)
+        demoMenu.autoenablesItems = false
+        demoMenu.delegate = self
         for fen in [5, 10, 20, 50, 100] {
             let title = String(format: "-%.2f（%d 次）", Double(fen) / 100.0, fen)
             let box = ActionBox { [weak self] in self?.model.playDemo(times: fen) }
@@ -339,7 +349,9 @@ final class PetController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(demo)
         menu.setSubmenu(demoMenu, for: demo)
 
-        let sizeMenu = NSMenu()
+        let sizeMenu = NSMenu(title: "尺寸")
+        sizeMenu.autoenablesItems = false
+        sizeMenu.delegate = self
         for (i, preset) in Self.sizePresets.enumerated() {
             let box = ActionBox { [weak self] in self?.setSize(index: i) }
             boxes.append(box)
@@ -365,7 +377,9 @@ final class PetController: NSObject, NSApplicationDelegate, NSMenuDelegate {
             self.state.save()
         })
 
-        let intervalMenu = NSMenu()
+        let intervalMenu = NSMenu(title: "刷新间隔")
+        intervalMenu.autoenablesItems = false
+        intervalMenu.delegate = self
         for seconds in [10.0, 30.0, 60.0, 300.0] {
             let title = seconds < 60 ? "\(Int(seconds)) 秒" : "\(Int(seconds / 60)) 分钟"
             let box = ActionBox { [weak self] in
@@ -403,13 +417,16 @@ final class PetController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return menu
     }
 
-    func showContextMenu() {
+    func showContextMenu(with event: NSEvent) {
         NSApp.activate(ignoringOtherApps: true)
         isMenuTracking = true
         window.ignoresMouseEvents = false
         defer { isMenuTracking = false }
         let menu = buildMenu(into: &popupBoxes)
-        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: 0), in: view)
+        // A tiny borderless host must not constrain the menu's available space.
+        // Position independently in screen coordinates at the original click.
+        let location = window.convertPoint(toScreen: event.locationInWindow)
+        menu.popUp(positioning: nil, at: location, in: nil)
     }
 
     private func buildStatusItem() {
@@ -423,12 +440,10 @@ final class PetController: NSObject, NSApplicationDelegate, NSMenuDelegate {
             button.toolTip = "DSH 余额桌宠"
         }
         item.menu = buildMenu(into: &statusBoxes)
-        item.menu?.delegate = self
         statusItem = item
     }
 
-    func menuWillOpen(_ menu: NSMenu) {
-        isMenuTracking = true
+    func menuNeedsUpdate(_ menu: NSMenu) {
         guard menu === statusItem?.menu else { return }
         let fresh = buildMenu(into: &statusBoxes)
         menu.removeAllItems()
@@ -438,7 +453,18 @@ final class PetController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
-    func menuDidClose(_ menu: NSMenu) { isMenuTracking = false }
+    // Menu structure must stay unchanged in AppKit's open/close callbacks.
+    func menuWillOpen(_ menu: NSMenu) {
+        if menu.supermenu == nil { isMenuTracking = true }
+    }
+
+    func menuDidClose(_ menu: NSMenu) {
+        if menu.supermenu == nil { isMenuTracking = false }
+    }
+
+    func confinementRect(for menu: NSMenu, on screen: NSScreen?) -> NSRect {
+        screen?.visibleFrame ?? .zero
+    }
 
     // MARK: - Actions
 

@@ -67,7 +67,7 @@ final class PetView: NSView {
 
     override func mouseDown(with event: NSEvent) {
         if event.modifierFlags.contains(.control) {
-            controller?.showContextMenu()
+            controller?.showContextMenu(with: event)
             return
         }
         isDragging = true
@@ -95,7 +95,7 @@ final class PetView: NSView {
     }
 
     override func rightMouseDown(with event: NSEvent) {
-        controller?.showContextMenu()
+        controller?.showContextMenu(with: event)
     }
 
     // MARK: - Drawing
