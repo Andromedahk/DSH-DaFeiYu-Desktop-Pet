@@ -1,2 +1,2 @@
-# V
+# DSHdesktop pet
 DSHdesktop pet是大肥鱼的余额桌宠，代码部分全都是deepseek写的，只有UI图片是我处理的awa 使用所需的所有东西都在压缩包里了
