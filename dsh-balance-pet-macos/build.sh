@@ -1,49 +1,59 @@
 #!/bin/bash
-# Build "DSH余额桌宠.app" with nothing but Xcode's swiftc and python3.
+# Build using only the macOS SDK and Xcode command line tools.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 BUILD="$ROOT/build"
-APP="$ROOT/dist/DSH余额桌宠.app"
+DIST="$ROOT/dist"
 NAME="DSHBalancePet"
+SWIFTC="$(xcrun --find swiftc)"
+LIPO="$(xcrun --find lipo)"
+SDK="$(xcrun --sdk macosx --show-sdk-path)"
+ARCH="${ARCH:-$(uname -m)}"
+case "$ARCH" in
+  arm64|x86_64|universal) ;;
+  *) echo "Unsupported ARCH: $ARCH (use arm64, x86_64 or universal)" >&2; exit 1 ;;
+esac
 
-echo "==> cleaning"
-rm -rf "$BUILD" "$ROOT/dist"
-mkdir -p "$BUILD" "$APP/Contents/MacOS" "$APP/Contents/Resources"
+mkdir -p "$BUILD/ModuleCache" "$DIST"
+STAGING="$(mktemp -d "$BUILD/bundle.XXXXXX")"
+trap 'rm -rf "$STAGING"' EXIT
+APP="$STAGING/DSH大肥鱼桌宠.app"
+FINAL="$DIST/DSH大肥鱼桌宠.app"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 
-echo "==> generating hit.wav"
-python3 "$ROOT/tools/make_hit_sound.py" "$BUILD/hit.wav"
+compile() {
+  echo "==> compiling $1"
+  "$SWIFTC" -swift-version 5 -O \
+    -sdk "$SDK" \
+    -module-cache-path "$BUILD/ModuleCache" \
+    -target "$1-apple-macos13.0" \
+    -o "$2" "$ROOT"/Sources/*.swift \
+    -framework AppKit -framework Foundation
+}
 
-echo "==> compiling Swift sources"
-ARCH="$(uname -m)"
-mkdir -p "$BUILD/ModuleCache" "$BUILD/tmp"
-# Keep every scratch path inside the project so a sandboxed shell can build too.
-export TMPDIR="$BUILD/tmp"
-swiftc \
-  -swift-version 5 \
-  -O \
-  -module-cache-path "$BUILD/ModuleCache" \
-  -target "${ARCH}-apple-macos13.0" \
-  -o "$APP/Contents/MacOS/$NAME" \
-  "$ROOT"/Sources/*.swift \
-  -framework AppKit \
-  -framework Foundation
-
-echo "==> assembling bundle"
-cp "$BUILD/hit.wav" "$APP/Contents/Resources/hit.wav"
-cp "$ROOT/Info.plist" "$APP/Contents/Info.plist"
-printf 'APPL????' > "$APP/Contents/PkgInfo"
-
-echo "==> ad-hoc signing"
-# Extended attributes left by the filesystem make codesign refuse to seal the
-# bundle ("detritus not allowed"), so clear them first.
-xattr -cr "$APP" 2>/dev/null || true
-if codesign --force --sign - "$APP" 2>/dev/null; then
-  echo "   sealed (ad-hoc)"
+if [[ "$ARCH" == universal ]]; then
+  compile arm64 "$STAGING/arm64"
+  compile x86_64 "$STAGING/x86_64"
+  "$LIPO" -create "$STAGING/arm64" "$STAGING/x86_64" -output "$APP/Contents/MacOS/$NAME"
 else
-  echo "   WARNING: could not seal the bundle; the binary keeps its linker signature"
+  compile "$ARCH" "$APP/Contents/MacOS/$NAME"
 fi
 
-echo
-echo "built: $APP"
-du -sh "$APP" | awk '{print "size:  " $1}'
+echo "==> copying original blue pet and sound"
+cp "$ROOT/Resources/sprite.png" "$APP/Contents/Resources/sprite.png"
+cp "$ROOT/Resources/hit.mp3" "$APP/Contents/Resources/hit.mp3"
+cp "$ROOT/Info.plist" "$APP/Contents/Info.plist"
+printf 'APPL????' > "$APP/Contents/PkgInfo"
+xattr -cr "$APP"
+codesign --force --sign - "$APP"
+codesign --verify --strict "$APP"
+
+# Keep the last successful build usable until the replacement is ready.
+if [[ -e "$FINAL" ]]; then mv "$FINAL" "$STAGING/previous.app"; fi
+if ! mv "$APP" "$FINAL"; then
+  if [[ -d "$STAGING/previous.app" ]]; then mv "$STAGING/previous.app" "$FINAL"; fi
+  exit 1
+fi
+echo "built: $FINAL"
+du -sh "$FINAL"

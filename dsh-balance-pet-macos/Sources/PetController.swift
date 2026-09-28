@@ -6,7 +6,7 @@ final class ActionBox: NSObject {
     @objc func fire(_ sender: Any?) { handler() }
 }
 
-final class PetController: NSObject, NSApplicationDelegate {
+final class PetController: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     let model = PetModel()
     private var view: PetView!
@@ -17,16 +17,15 @@ final class PetController: NSObject, NSApplicationDelegate {
 
     private var tickTimer: Timer?
     private var lastFrame: CFTimeInterval = CACurrentMediaTime()
-    private var pollAccum: Double = 0
-    private var currentDelay: Double = 30
-    private var polling = false
-    private var didStartupPoll = false
+    private var schedule = PollSchedule(interval: 30)
     private var statusAccum: Double = 0
+    private var wakeObserver: NSObjectProtocol?
+    private var screenObserver: NSObjectProtocol?
 
     private var statusBoxes: [ActionBox] = []
     private var popupBoxes: [ActionBox] = []
+    private var isMenuTracking = false
 
-    private let soundQueue = DispatchQueue(label: "dshpet.sound")
     private var soundPlayers: [NSSound] = []
     private var soundIndex = 0
 
@@ -45,6 +44,7 @@ final class PetController: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.accessory)
 
         credential = CredentialStore.resolve()
+        schedule = PollSchedule(interval: state.pollSeconds)
 
         view = PetView(model: model)
         view.controller = self
@@ -72,6 +72,16 @@ final class PetController: NSObject, NSApplicationDelegate {
 
         buildStatusItem()
         startTick()
+        wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didWakeNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            guard let self = self else { return }
+            self.lastFrame = CACurrentMediaTime()
+            self.schedule.wake(at: self.lastFrame)
+        }
+        screenObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main
+        ) { [weak self] _ in self?.keepWindowVisible() }
 
         let f = window.frame
         Log.write(String(format: "started: size=%.0fpt frame=(%.0f,%.0f %.0fx%.0f) screen=%@ credential=%@",
@@ -83,13 +93,16 @@ final class PetController: NSObject, NSApplicationDelegate {
         }
 
         writeStatus()
-        // Fire the first request right away instead of waiting a full interval.
-        pollAccum = currentDelay
+        poll(snap: true)
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        tickTimer?.invalidate()
+        if let observer = wakeObserver { NSWorkspace.shared.notificationCenter.removeObserver(observer) }
+        if let observer = screenObserver { NotificationCenter.default.removeObserver(observer) }
         state.windowOrigin = window?.frame.origin
         state.save()
+        if window != nil { writeStatus(running: false) }
     }
 
     // MARK: - Window placement
@@ -107,7 +120,15 @@ final class PetController: NSObject, NSApplicationDelegate {
 
     private func isOnScreen(origin: NSPoint, size: NSSize) -> Bool {
         let frame = NSRect(origin: origin, size: size)
-        return NSScreen.screens.contains { $0.visibleFrame.intersects(frame) }
+        return NSScreen.screens.contains { $0.visibleFrame.contains(frame) }
+    }
+
+    private func keepWindowVisible() {
+        guard let window = window else { return }
+        if !isOnScreen(origin: window.frame.origin, size: window.frame.size) {
+            snapToCorner(animated: false)
+            state.save()
+        }
     }
 
     /// Snap to the bottom-left corner. `on` defaults to the screen the pet is
@@ -137,7 +158,8 @@ final class PetController: NSObject, NSApplicationDelegate {
     // MARK: - Tick
 
     private func startTick() {
-        let t = Timer(timeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in self?.frameTick() }
+        let t = Timer(timeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in self?.frameTick() }
+        t.tolerance = 0.005
         RunLoop.main.add(t, forMode: .common)
         tickTimer = t
     }
@@ -147,15 +169,15 @@ final class PetController: NSObject, NSApplicationDelegate {
         let dt = min(0.1, now - lastFrame)
         lastFrame = now
 
+        let wasAnimating = model.needsAnimationFrame
         model.tick(dt)
-        view.needsDisplay = true
+        if wasAnimating || model.needsAnimationFrame { view.needsDisplay = true }
 
-        pollAccum += dt
-        if !polling && pollAccum >= currentDelay {
-            pollAccum = 0
-            poll(snap: !didStartupPoll)
-            didStartupPoll = true
-        }
+        // NSView.hitTest alone cannot pass an event through an entire window.
+        // Polling the pointer needs no global input-monitoring permission.
+        let point = view.convert(window.convertPoint(fromScreen: NSEvent.mouseLocation), from: nil)
+        window.ignoresMouseEvents = !isMenuTracking && !view.isDragging && !view.containsInteractivePoint(point)
+        if credential != nil { poll(snap: false) }
 
         statusAccum += dt
         if statusAccum >= 1.0 {
@@ -166,10 +188,10 @@ final class PetController: NSObject, NSApplicationDelegate {
 
     /// Publish a small liveness/geometry snapshot so the pet can be inspected
     /// from another process without screen-recording permission.
-    private func writeStatus() {
+    private func writeStatus(running: Bool = true) {
         let f = window.frame
         let obj: [String: Any] = [
-            "running": true,
+            "running": running,
             "pid": Int(ProcessInfo.processInfo.processIdentifier),
             "connected": model.connected,
             "display": model.displayString,
@@ -190,19 +212,20 @@ final class PetController: NSObject, NSApplicationDelegate {
             "updatedAt": Date().timeIntervalSince1970,
         ]
         if let d = try? JSONSerialization.data(withJSONObject: obj, options: [.prettyPrinted, .sortedKeys]) {
-            try? d.write(to: PetPaths.statusURL)
+            try? d.write(to: PetPaths.statusURL, options: .atomic)
         }
     }
 
     // MARK: - Polling
 
-    private func poll(snap: Bool) {
+    private func poll(snap: Bool, force: Bool = false) {
         guard let cred = credential else {
             model.setNoCredential()
             model.setCredentialSource(credentialSourceLabel())
+            view.needsDisplay = true
             return
         }
-        polling = true
+        guard let request = schedule.begin(at: CACurrentMediaTime(), force: force) else { return }
         DispatchQueue.global(qos: .utility).async { [weak self] in
             guard let self = self else { return }
             let outcome: Result<BalanceReading, Error>
@@ -210,7 +233,11 @@ final class PetController: NSObject, NSApplicationDelegate {
             catch { outcome = .failure(error) }
 
             DispatchQueue.main.async {
-                self.polling = false
+                let failure: FetchError?
+                if case .failure(let error) = outcome {
+                    failure = (error as? FetchError) ?? .transport(error.localizedDescription)
+                } else { failure = nil }
+                guard self.schedule.finish(request, error: failure, at: CACurrentMediaTime()) else { return }
                 switch outcome {
                 case .success(let reading):
                     let wasDisconnected = !self.model.connected
@@ -219,20 +246,18 @@ final class PetController: NSObject, NSApplicationDelegate {
                     } else {
                         self.model.apply(reading: reading, snap: false)
                     }
-                    self.currentDelay = self.state.pollSeconds
                     Log.write(String(format: "poll ok: CNY %.4f (normal %.4f + bonus %.4f)",
                                      reading.totalCny, reading.normalCny, reading.bonusCny))
                 case .failure(let error):
                     let fe = (error as? FetchError) ?? .transport(error.localizedDescription)
                     self.model.fail(fe)
-                    if case .rateLimited(let retryAfter) = fe {
-                        let backoff = retryAfter ?? min(self.currentDelay * 2, 300)
-                        self.currentDelay = min(max(backoff, 10), 300)
-                        Log.write(String(format: "rate limited, next poll in %.0fs", self.currentDelay))
-                    } else {
-                        self.currentDelay = self.state.pollSeconds
+                    if case .rateLimited = fe {
+                        Log.write(String(format: "rate limited, next poll in %.0fs",
+                                         max(0, self.schedule.nextPollAt - CACurrentMediaTime())))
                     }
                 }
+                self.view.needsDisplay = true
+                self.writeStatus()
             }
         }
     }
@@ -245,24 +270,20 @@ final class PetController: NSObject, NSApplicationDelegate {
 
     private func playHit() {
         guard state.soundOn, let url = PetPaths.soundURL else { return }
-        soundQueue.async { [weak self] in
-            guard let self = self else { return }
-            if self.soundPlayers.isEmpty {
-                for _ in 0..<4 {
-                    if let s = NSSound(contentsOf: url, byReference: true) {
-                        s.volume = 0.7
-                        self.soundPlayers.append(s)
-                    }
+        // All players and indexes are owned by the main thread.
+        if soundPlayers.isEmpty {
+            for _ in 0..<4 {
+                if let s = NSSound(contentsOf: url, byReference: true) {
+                    s.volume = 0.7
+                    soundPlayers.append(s)
                 }
             }
-            guard !self.soundPlayers.isEmpty else { return }
-            DispatchQueue.main.async {
-                let player = self.soundPlayers[self.soundIndex % self.soundPlayers.count]
-                self.soundIndex += 1
-                player.stop()
-                player.play()
-            }
         }
+        guard !soundPlayers.isEmpty else { return }
+        let player = soundPlayers[soundIndex]
+        soundIndex = (soundIndex + 1) % soundPlayers.count
+        player.stop()
+        player.play()
     }
 
     // MARK: - Menus
@@ -300,9 +321,8 @@ final class PetController: NSObject, NSApplicationDelegate {
         }
         menu.addItem(.separator())
 
-        menu.addItem(item("立即刷新余额") { [weak self] in
-            self?.pollAccum = 0
-            self?.poll(snap: true)
+        menu.addItem(item("立即刷新余额", schedule.canRefresh(at: CACurrentMediaTime())) { [weak self] in
+            self?.poll(snap: true, force: true)
         })
         menu.addItem(item("测试一次扣费") { [weak self] in self?.model.playOneHit() })
 
@@ -341,6 +361,7 @@ final class PetController: NSObject, NSApplicationDelegate {
         menu.addItem(item(state.soundOn ? "✓ 音效" : "　音效") { [weak self] in
             guard let self = self else { return }
             self.state.soundOn.toggle()
+            if !self.state.soundOn { self.soundPlayers.forEach { $0.stop() } }
             self.state.save()
         })
 
@@ -350,8 +371,7 @@ final class PetController: NSObject, NSApplicationDelegate {
             let box = ActionBox { [weak self] in
                 guard let self = self else { return }
                 self.state.pollSeconds = seconds
-                self.currentDelay = seconds
-                self.pollAccum = 0
+                self.schedule.setInterval(seconds, at: CACurrentMediaTime())
                 self.state.save()
             }
             boxes.append(box)
@@ -367,7 +387,10 @@ final class PetController: NSObject, NSApplicationDelegate {
         menu.addItem(.separator())
         menu.addItem(item("设置 API Key…") { [weak self] in self?.askForKey() })
         menu.addItem(item("重新读取凭证") { [weak self] in self?.reloadCredential() })
-        menu.addItem(item("吸附回左下角") { [weak self] in self?.snapToCorner(animated: true) })
+        menu.addItem(item("吸附回左下角") { [weak self] in
+            self?.snapToCorner(animated: true)
+            self?.state.save()
+        })
         menu.addItem(item("打开日志") {
             NSWorkspace.shared.open(PetPaths.logURL)
         })
@@ -382,6 +405,9 @@ final class PetController: NSObject, NSApplicationDelegate {
 
     func showContextMenu() {
         NSApp.activate(ignoringOtherApps: true)
+        isMenuTracking = true
+        window.ignoresMouseEvents = false
+        defer { isMenuTracking = false }
         let menu = buildMenu(into: &popupBoxes)
         menu.popUp(positioning: nil, at: NSPoint(x: 0, y: 0), in: view)
     }
@@ -397,33 +423,45 @@ final class PetController: NSObject, NSApplicationDelegate {
             button.toolTip = "DSH 余额桌宠"
         }
         item.menu = buildMenu(into: &statusBoxes)
+        item.menu?.delegate = self
         statusItem = item
     }
 
-    private func refreshStatusMenu() {
-        statusItem?.menu = buildMenu(into: &statusBoxes)
+    func menuWillOpen(_ menu: NSMenu) {
+        isMenuTracking = true
+        guard menu === statusItem?.menu else { return }
+        let fresh = buildMenu(into: &statusBoxes)
+        menu.removeAllItems()
+        for item in fresh.items {
+            fresh.removeItem(item)
+            menu.addItem(item)
+        }
     }
+
+    func menuDidClose(_ menu: NSMenu) { isMenuTracking = false }
 
     // MARK: - Actions
 
     private func setSize(index: Int) {
         state.sizeIndex = min(max(index, 0), Self.sizePresets.count - 1)
-        state.save()
         let newSize = NSSize(width: side, height: side * (1 + PetView.floatBand))
-        var origin = window.frame.origin
-        origin.y -= (newSize.height - window.frame.height)
+        let origin = window.frame.origin
         window.setFrame(NSRect(origin: origin, size: newSize), display: true)
+        keepWindowVisible()
         state.windowOrigin = window.frame.origin
         state.save()
     }
 
     private func reloadCredential() {
         credential = CredentialStore.resolve()
+        schedule.reload(at: CACurrentMediaTime())
+        model.resetForCredentialChange()
         model.setCredentialSource(credentialSourceLabel())
         if credential == nil {
             model.setNoCredential()
         }
-        pollAccum = currentDelay
+        view.needsDisplay = true
+        poll(snap: true)
         Log.write("credential reloaded: \(credential?.shortDescription ?? "none")")
     }
 
@@ -435,12 +473,13 @@ final class PetController: NSObject, NSApplicationDelegate {
         填入 sk- 开头的 DeepSeek API Key，会保存到：
         \(PetPaths.userKeyURL.path)
 
-        留空直接点「保存」= 不改动，继续使用当前的 DSH 账号凭证。
+        留空直接点「保存」不会改动当前凭证。
+        如果设置了 DSHPET_KEY 环境变量或应用目录 apikey.txt，它们优先于此处保存的 Key。
         """
         alert.addButton(withTitle: "保存")
         alert.addButton(withTitle: "取消")
 
-        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 360, height: 24))
+        let field = NSSecureTextField(frame: NSRect(x: 0, y: 0, width: 360, height: 24))
         field.placeholderString = "sk-..."
         alert.accessoryView = field
         alert.window.initialFirstResponder = field
@@ -448,10 +487,16 @@ final class PetController: NSObject, NSApplicationDelegate {
         if alert.runModal() == .alertFirstButtonReturn {
             let value = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !value.isEmpty else { return }
-            try? value.write(to: PetPaths.userKeyURL, atomically: true, encoding: .utf8)
-            try? FileManager.default.setAttributes([.posixPermissions: 0o600],
-                                                   ofItemAtPath: PetPaths.userKeyURL.path)
-            reloadCredential()
+            do {
+                try CredentialStore.saveAPIKey(value, to: PetPaths.userKeyURL)
+                reloadCredential()
+            } catch {
+                let failure = NSAlert()
+                failure.messageText = "API Key 未保存"
+                failure.informativeText = error.localizedDescription
+                failure.alertStyle = .warning
+                failure.runModal()
+            }
         }
     }
 }

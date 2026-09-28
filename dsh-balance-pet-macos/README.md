@@ -1,158 +1,104 @@
-# DSH 余额桌宠（macOS 原生版）
+# DSH大肥鱼桌宠 · macOS
 
-一个贴在桌面上的小挂件：角色举着一块平板，平板上实时显示 DeepSeek / DSH 余额。
-余额每掉 **0.01 元**，角色就红闪 + 震动 + 播放打击音效，头顶飘出一个 `-0.01`。
+用于 DeepSeek Harness 的原生余额桌宠，基于 [VKmich16/V](https://github.com/VKmich16/V) 移植。默认使用原版**蓝色大肥鱼**图片及 `hit.mp3` 音效；余额显示在角色手持的倾斜平板内。
 
-原版（`VKmich16/V`）是 Windows PowerShell + WinForms 程序，在 macOS 上跑不了，
-这个仓库是按同样的玩法用 **Swift + AppKit** 重写的原生实现：**零第三方依赖**、
-约 1.4 MB 内存占用、不联网上传任何数据（只请求余额接口）。
+它是独立的 Swift + AppKit 应用，可读取 DSH 凭证；无需修改或持续运行 DSH。目前维护和支持 macOS 13+。
 
-![四种状态](docs/screenshots/01-connected.png)
+![蓝色大肥鱼与余额](docs/screenshots/01-connected.png)
 
----
+## 构建与运行
 
-## 快速开始
+需要 Xcode 命令行工具或 Xcode。无第三方依赖、无需联网下载包。
 
-```bash
-./build.sh                                   # 编译，无需网络
-open "dist/DSH余额桌宠.app"                   # 启动
+```sh
+./build.sh
+open 'dist/DSH大肥鱼桌宠.app'
 ```
 
-首次启动会出现在**主屏左下角**。之后会记住你拖到的位置。
+默认编译当前机器架构。可选 `ARCH=arm64`、`ARCH=x86_64` 或 `ARCH=universal ./build.sh`；universal 同时包含 Apple Silicon 与 Intel。构建会验证临时签名，成功后替换同名产物，不清空整个 `dist` 目录。
 
-> 需要 macOS 13+ 和 Xcode 命令行工具（`xcode-select --install`）。
-> 已经编译好的 `dist/DSH余额桌宠.app` 可以直接双击运行。
-> 没有 Dock 图标、没有菜单栏图标之外的存在感——退出请**右键宠物 → 退出**。
-
-### 不看屏幕也能确认它在正常工作
-
-```bash
-"./dist/DSH余额桌宠.app/Contents/MacOS/DSHBalancePet" --windows
-```
-
-会打印余额、连接状态、凭证来源、窗口坐标 / 层级 / 是否可见。
-
----
+应用不显示 Dock 图标，菜单栏有 ¥ 图标。首次出现在主屏左下角，之后记住位置。旧版本的 `DSHBalancePet` 配置目录沿用，原有偏好无需迁移。
 
 ## 操作
 
 | 操作 | 效果 |
 | --- | --- |
-| 左键拖动 | 移动；松手后自动吸附回左下角（可在菜单里关掉） |
-| 右键宠物 | 打开菜单（也可以在状态栏的 ¥ 图标上右键） |
-| 透明区域 | 鼠标穿透，不挡你点别的窗口 |
+| 左键拖动 | 移动；默认松手吸附当前屏幕左下角，可关闭 |
+| 右键 / Control + 单击 | 打开菜单 |
+| 菜单栏 ¥ | 查看余额、凭证来源及操作菜单 |
+| 透明区域 / 飘字区域 | 鼠标穿透 |
+| 立即刷新余额 | 对齐真实余额，跳过排队动画；请求中或限流等待期不可重复刷新 |
+| 测试一次扣费 / 演示连续扣费 | 仅演示，不修改真实余额，不发起扣费 |
+| 尺寸 | 110 / 150 / 210 / 280 pt |
+| 音效 | 开关原版打击音，默认开启 |
+| 重新读取凭证 | 凭证变化后重新连接，旧请求结果会丢弃 |
+| 退出 | 正常保存位置并退出 |
 
-右键菜单：
+每下降一分钱，红闪、震动、播放音效并飘出 `-0.01`；间隔 0.2 秒。超过 400 分的变化直接对齐，避免长时间播放积压动画。充值立即显示，并根据连续两次服务器余额计算到账金额。演示余额与真实余额分开处理。
 
-| 项目 | 说明 |
-| --- | --- |
-| 立即刷新余额 | 马上请求一次，平板直接跳到最新值，不补播动画 |
-| 测试一次扣费 | 纯演示，播一次红闪 + 飘字 + 音效，不动真实余额 |
-| 演示连续扣费 | `-0.05 / -0.1 / -0.2 / -0.5 / -1.0`，节奏和真实扣费完全一样，播完自动回到真实余额 |
-| 尺寸 | 小 110 / 中 150 / 大 210 / 特大 280（pt） |
-| 松手吸附左下角 | 开关 |
-| 音效 | 开关 |
-| 刷新间隔 | 10 秒 / 30 秒 / 1 分钟 / 5 分钟 |
-| 设置 API Key… | 写入配置目录的 `apikey.txt`（权限 0600） |
-| 重新读取凭证 | 改完凭证不用重启 |
-| 打开日志 / 打开配置文件夹 | 排查问题用 |
-| 退出 | 关闭 |
+## 凭证与余额
 
----
+按顺序读取第一个配置来源：
 
-## 凭证是怎么拿到的
+1. 环境变量 `DSHPET_KEY`。
+2. 可执行文件旁的 `apikey.txt`（应用包内为 `Contents/MacOS/apikey.txt`）。
+3. 配置目录的 `apikey.txt`，右键“设置 API Key…”写入这里。
+4. `~/.dsh/.credentials.yaml` 的 `DEEPSEEK_API_KEY`。
+5. 同一 YAML 文件的 `deepseek-account-platform/default` 账号记录。
 
-按顺序尝试，第一个成功的就用：
+设置窗口隐藏输入内容，保存采用权限 `0600` 的临时文件原子替换，失败会提示。环境变量及应用内 Key 的优先级高于设置窗口保存的 Key。推荐使用设置窗口，不要把密钥放进仓库或应用发布包。
 
-1. 环境变量 `DSHPET_KEY`
-2. 应用目录下的 `apikey.txt`
-3. 配置目录下的 `apikey.txt`（右键 → 设置 API Key 写的就是这个）
-4. `~/.dsh/.credentials.yaml` 里的 `DEEPSEEK_API_KEY`
-5. **`~/.dsh/.credentials.yaml` 里 DSH 自己的账号凭证**（`deepseek-account-platform/default`）
-
-第 5 条是这台机器上实际生效的那条：DSH 是用**平台账号 token**登录的，
-`~/.dsh/.credentials.yaml` 里根本没有 `DEEPSEEK_API_KEY`。所以本程序支持两种模式：
-
-| 模式 | 端点 | 认证头 |
+| 模式 | 请求地址 | 认证 |
 | --- | --- | --- |
-| API Key（`sk-…`） | `https://api.deepseek.com/user/balance` | `Authorization: Bearer …` |
-| DSH 账号凭证 | `<issuer>/api/v0/users/get_user_summary` | `x-dsh-auth-token: …` |
+| API Key | `https://api.deepseek.com/user/balance` | `Authorization: Bearer …` |
+| DSH 平台账号 | 凭证内 HTTPS `issuer` + `/api/v0/users/get_user_summary` | `x-dsh-auth-token` |
 
-账号模式的响应是三层信封，余额在 `data.biz_data.normal_wallets`（外加 `bonus_wallets`），
-平板显示的是两者 CNY 之和。这一点是从 DSH 自己的 `dsh-deepseek-account-platform`
-插件里读出来的，不是猜的。
+账号余额读取 `data.biz_data.normal_wallets` 与 `bonus_wallets` 的 **CNY** 总和。数字以十进制定点方式解析，合计后四舍五入到分。USD 不会冒充人民币；缺少有效 CNY、错误信封或异常数值会显示错误并保留最后读数。不会自行兑换货币。
 
-> **注意**：这条路径会读取你的 DSH 登录凭证，并且只把它发给凭证自身记录的
-> `issuer`（即 `platform.deepseek.com`）。如果你不希望这样，把 `~/.dsh/.credentials.yaml`
-> 里的账号记录删掉，改在第 1～3 条里放一个 `sk-` API Key 即可。
+账号请求只使用本地凭证记录的 HTTPS issuer，拒绝含用户名、查询参数等不安全格式的地址，并拒绝所有 HTTP 重定向。应用不把凭证写入日志。默认每 30 秒请求一次，可改为 10 / 30 / 60 / 300 秒；间隔从上次请求完成后计算。429 优先遵守 `Retry-After`（秒数或 HTTP 日期，最多 24 小时），未提供时逐次退避，最多 5 分钟。
 
----
+YAML 读取器支持 DSH 常用的块式映射、引号与注释，不是通用 YAML 解析器；不支持锚点、别名或多行凭证。
 
-## 关于轮询频率（重要）
+## 本地文件
 
-`platform.deepseek.com` 这个接口**有速率限制**：连续快速请求会返回 **429**。
+默认目录：`~/Library/Application Support/DSHBalancePet/`。
 
-所以默认轮询是 **30 秒**，而不是原版 Windows 版的 2 秒。命中 429 时会自动退避
-（按 `Retry-After` 或翻倍，最多 5 分钟），并在日志里记一行。
-
-余额下降时会**一分钱一分钱地扣**（每 0.2 秒一步，每步都有完整的动画 + 音效），
-所以即使 30 秒才拉一次，看起来依然是连续掉钱。一次跳变超过 400 分（例如机器睡了
-一整晚）会直接对齐，避免排队播几千次动画。
-
----
-
-## 文件位置
-
-| 路径 | 内容 |
+| 文件 | 内容 |
 | --- | --- |
-| `~/Library/Application Support/DSHBalancePet/pet.log` | 每次请求的结果、启动信息 |
-| `~/Library/Application Support/DSHBalancePet/state.json` | 尺寸、开关、窗口位置 |
-| `~/Library/Application Support/DSHBalancePet/status.json` | 运行时状态（约每秒刷新） |
-| `~/Library/Application Support/DSHBalancePet/apikey.txt` | 只有你手动设置过才存在 |
+| `apikey.txt` | 手动保存的 API Key |
+| `state.json` | 尺寸、音效、刷新间隔及窗口位置 |
+| `status.json` | 最近运行状态、余额与窗口信息，每秒原子更新 |
+| `pet.log` / `pet.log.1` | 本地诊断日志，单份约 1 MiB 后轮换；可能包含余额 |
+| `pet.lock` | 防止同一配置目录重复启动；退出/崩溃后系统释放锁 |
 
-设 `DSHPET_HOME=/some/dir` 可以把上面这些全部改到指定目录（便携模式）。
-卸载 = 删掉 `.app` + 上面这个目录。
+`DSHPET_HOME=/some/dir` 指定独立配置目录。`DSHPET_OFFLINE=1` 完全跳过凭证读取与联网，适合演示和测试。
 
----
+## 验证与诊断
 
-## 诊断与自测
+```sh
+./verify.sh
 
-```bash
-BIN="./dist/DSH余额桌宠.app/Contents/MacOS/DSHBalancePet"
-
-"$BIN" --selftest     # 14 项断言：记账不漂移、到账、四舍五入、点击穿透区域
-"$BIN" --check        # 打印凭证来源，真实请求一次并显示余额
-"$BIN" --screens      # 打印 NSScreen 布局（多显示器排查）
-"$BIN" --snapshot DIR # 离屏渲染 4 张 PNG，不需要录屏权限
-"$BIN" --windows      # 读取运行中实例的状态文件
-"$BIN" --reset        # 清除保存的窗口位置
+BIN='./dist/DSH大肥鱼桌宠.app/Contents/MacOS/DSHBalancePet'
+"$BIN" --selftest       # 离线回归、资源解码与透明区域命中检查
+"$BIN" --snapshot DIR   # 状态、尺寸和透明预览，使用示例余额
+"$BIN" --windows        # 当前配置目录的最近状态；停止/过期返回非零
+"$BIN" --screens        # 显示器布局
+"$BIN" --reset          # 退出桌宠后，仅清除保存的位置，保留其他偏好
+"$BIN" --check          # 可选：读取真实凭证并实际查询一次余额
 ```
 
-`--snapshot` 会渲染 4 种状态：已连接、扣费中、到账、未配置凭证。
+`verify.sh` 使用隔离的临时配置和离线模式；覆盖回归测试、素材一致性、签名、启动、重复实例与位置重置。输出在 `build/verification`。GitHub Actions 在推送时构建 universal 包、执行同一验证并保存下载产物。本机已通过 Apple Silicon 原生及 Rosetta 的 Intel 指令集测试；实际账号接口及 Intel 实机运行仍需对应环境验证。
 
-## 源码结构
+## 源码与来源
 
-```
-Sources/
-├── AppConfig.swift      路径、日志、凭证解析（含 YAML 账号记录解析）、状态持久化
-├── BalanceClient.swift  两种模式的 HTTP + 响应解析、429 处理
-├── PetModel.swift       以「分」为单位的记账 + 动画状态机
-├── PetView.swift        角色/平板/飘字绘制、拖动、右键、点击穿透
-├── PetController.swift  窗口、菜单、状态栏、轮询、音效
-├── Diagnostics.swift    自测 / 真实请求 / 离屏渲染 / 屏幕诊断
-└── main.swift           入口
-tools/make_hit_sound.py  纯标准库生成打击音效（不含任何第三方素材）
-```
+- `AppConfig.swift`：凭证、路径、设置与日志。
+- `BalanceClient.swift`：请求、严格响应解析与精确金额。
+- `PetModel.swift`：余额和动画；`PollSchedule.swift`：请求调度。
+- `PetController.swift`：窗口、菜单、轮询与音效。
+- `PetView.swift` / `PetAssets.swift`：原版图片、平板文字和透明区域交互。
+- `Diagnostics.swift` / `*SelfTests.swift`：离线回归与诊断。
+- `Resources/`：从 Windows 原版逐字节复制的 `sprite.png`、`hit.mp3`。
 
-角色、平板、飘字全部是用 Core Graphics 画出来的，音效是脚本合成的，
-所以这个仓库**不包含任何第三方美术或音频素材**。
+上游原始代码及素材完整保存在仓库的 `原版（Windows版）`，来源见 [素材说明](Resources/README.md)。旧音效生成脚本保留供参考，默认构建不再使用。
 
----
-
-## 已知边界
-
-- 只在 Apple Silicon 上验证过（`arm64-apple-macos13.0`）。Intel 也可以编译，
-  把 `build.sh` 里的 `-target` 换成 `x86_64-apple-macos13.0` 即可。
-- 右键菜单需要 AppKit 把应用激活才弹得出来，所以右键的瞬间 DSH 余额桌宠会成为
-  前台应用（`.accessory` 模式，不会出现 Dock 图标）。
-- 余额接口返回的是字符串精度（`"38.6177023600000000"`），显示按四舍五入到分。
+本应用使用本地临时签名，未经过 Apple 开发者签名与公证。构建通过不等于所有 macOS/Intel 机型均已实测；离屏截图也不等于所有跨应用鼠标交互均已验证。

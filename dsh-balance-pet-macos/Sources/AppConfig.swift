@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 
 // MARK: - Logging
 
@@ -12,16 +13,23 @@ enum Log {
     }()
 
     static func write(_ message: String) {
-        let line = fmt.string(from: Date()) + " " + message + "\n"
         queue.async {
+            let line = fmt.string(from: Date()) + " " + message + "\n"
             guard let data = line.data(using: .utf8) else { return }
             let url = PetPaths.logURL
+            let fm = FileManager.default
+            if let size = (try? fm.attributesOfItem(atPath: url.path)[.size]) as? NSNumber,
+               size.intValue >= 1_048_576 {
+                let previous = url.appendingPathExtension("1")
+                // rename replaces the previous rotation atomically.
+                _ = rename(url.path, previous.path)
+            }
             if let handle = try? FileHandle(forWritingTo: url) {
                 defer { try? handle.close() }
                 _ = try? handle.seekToEnd()
                 try? handle.write(contentsOf: data)
             } else {
-                try? data.write(to: url)
+                _ = fm.createFile(atPath: url.path, contents: data, attributes: [.posixPermissions: 0o600])
             }
         }
     }
@@ -36,13 +44,13 @@ enum PetPaths {
         // build's own end-to-end test keeps its state out of the real profile).
         if let override = ProcessInfo.processInfo.environment["DSHPET_HOME"], !override.isEmpty {
             let dir = URL(fileURLWithPath: (override as NSString).expandingTildeInPath, isDirectory: true)
-            try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
+            try? fm.createDirectory(at: dir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
             return dir
         }
         let base = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? URL(fileURLWithPath: NSHomeDirectory() + "/Library/Application Support")
         let dir = base.appendingPathComponent("DSHBalancePet", isDirectory: true)
-        try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        try? fm.createDirectory(at: dir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         return dir
     }()
 
@@ -63,8 +71,11 @@ enum PetPaths {
 
     static var soundURL: URL? {
         let candidates: [URL?] = [
+            Bundle.main.url(forResource: "hit", withExtension: "mp3"),
             Bundle.main.url(forResource: "hit", withExtension: "wav"),
+            support.appendingPathComponent("hit.mp3"),
             support.appendingPathComponent("hit.wav"),
+            executableDir.appendingPathComponent("hit.mp3"),
             executableDir.appendingPathComponent("hit.wav"),
         ]
         return candidates.compactMap { $0 }.first { FileManager.default.fileExists(atPath: $0.path) }
@@ -97,94 +108,192 @@ struct Credential {
 enum CredentialStore {
     static let apiKeyEndpoint = "https://api.deepseek.com/user/balance"
 
-    /// Resolution order:
-    ///   1. DSHPET_KEY environment variable
-    ///   2. apikey.txt next to the executable
-    ///   3. apikey.txt in Application Support
-    ///   4. DEEPSEEK_API_KEY inside ~/.dsh/.credentials.yaml
-    ///   5. the DSH account-platform grant in ~/.dsh/.credentials.yaml
+    /// First configured source wins. Offline diagnostics must never read a real key.
     static func resolve() -> Credential? {
         let env = ProcessInfo.processInfo.environment
-
-        if let v = env["DSHPET_KEY"], !v.trimmingCharacters(in: .whitespaces).isEmpty {
-            return apiKey(v, source: "环境变量 DSHPET_KEY")
+        if env["DSHPET_OFFLINE"] == "1" { return nil }
+        if let value = env["DSHPET_KEY"], !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return apiKey(value, source: "环境变量 DSHPET_KEY")
         }
-        if let v = readKeyFile(PetPaths.sidecarKeyURL) {
-            return apiKey(v, source: "apikey.txt（应用目录）")
+        if let value = readKeyFile(PetPaths.sidecarKeyURL) {
+            return apiKey(value, source: "apikey.txt（应用目录）")
         }
-        if let v = readKeyFile(PetPaths.userKeyURL) {
-            return apiKey(v, source: "apikey.txt（配置目录）")
+        if let value = readKeyFile(PetPaths.userKeyURL) {
+            return apiKey(value, source: "apikey.txt（配置目录）")
         }
-
         let yaml = (try? String(contentsOf: PetPaths.dshCredentials, encoding: .utf8)) ?? ""
-
-        if let key = firstGroup(in: yaml, pattern: "DEEPSEEK_API_KEY\\s*:\\s*[\"']?([A-Za-z0-9_\\-]{8,})") {
-            return apiKey(key, source: "~/.dsh/.credentials.yaml")
-        }
-        if let grant = accountGrant(from: yaml) {
-            let base = grant.issuer.hasSuffix("/") ? String(grant.issuer.dropLast()) : grant.issuer
-            let path = env["DSHPET_API_PATH"] ?? "/api/v0/users/get_user_summary"
-            if let url = URL(string: base + path) {
-                return Credential(mode: .account, token: grant.token, endpoint: url,
-                                  source: "DSH 账号（\(URL(string: base)?.host ?? base)）")
-            }
+        if let key = yamlAPIKey(from: yaml) { return apiKey(key, source: "~/.dsh/.credentials.yaml") }
+        if let grant = accountGrant(from: yaml),
+           let endpoint = accountEndpoint(issuer: grant.issuer, path: env["DSHPET_API_PATH"] ?? "/api/v0/users/get_user_summary") {
+            return Credential(mode: .account, token: grant.token, endpoint: endpoint,
+                              source: "DSH 账号（\(endpoint.host ?? "")）")
         }
         return nil
     }
 
+    static func isValidToken(_ value: String) -> Bool {
+        // Credentials are single-line HTTP header values, never arbitrary text.
+        !value.isEmpty && value.utf8.count <= 16_384 && value.unicodeScalars.allSatisfy { $0.value >= 33 && $0.value <= 126 }
+    }
+
+    static func isSafeEndpoint(_ url: URL) -> Bool {
+        guard let parts = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              parts.scheme?.lowercased() == "https", let host = parts.host, !host.isEmpty,
+              parts.user == nil, parts.password == nil, parts.fragment == nil,
+              parts.query == nil else { return false }
+        return !host.contains(where: { $0.isWhitespace })
+    }
+
+    static func accountEndpoint(issuer: String, path: String) -> URL? {
+        guard !issuer.contains(where: { $0.isWhitespace || $0 == "\\" }),
+              let base = URL(string: issuer), isSafeEndpoint(base),
+              var parts = URLComponents(url: base, resolvingAgainstBaseURL: false),
+              path.hasPrefix("/"), !path.hasPrefix("//"),
+              !path.contains(where: { $0.isWhitespace || $0 == "\\" || $0 == "?" || $0 == "#" || $0 == "%" }),
+              !path.split(separator: "/").contains(where: { $0 == "." || $0 == ".." }) else { return nil }
+        parts.path = parts.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        parts.path = (parts.path.isEmpty ? "" : "/" + parts.path) + path
+        guard let url = parts.url, isSafeEndpoint(url) else { return nil }
+        return url
+    }
+
     private static func apiKey(_ raw: String, source: String) -> Credential? {
-        let v = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !v.isEmpty, let url = URL(string: apiKeyEndpoint) else { return nil }
-        return Credential(mode: .apiKey, token: v, endpoint: url, source: source)
+        let value = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard isValidToken(value), let url = URL(string: apiKeyEndpoint) else { return nil }
+        return Credential(mode: .apiKey, token: value, endpoint: url, source: source)
     }
 
     private static func readKeyFile(_ url: URL) -> String? {
         guard let raw = try? String(contentsOf: url, encoding: .utf8) else { return nil }
-        let v = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        return v.isEmpty ? nil : v
+        let value = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        return value.isEmpty ? nil : value
     }
 
-    private static func firstGroup(in text: String, pattern: String) -> String? {
-        guard let re = try? NSRegularExpression(pattern: pattern) else { return nil }
-        let ns = text as NSString
-        guard let m = re.firstMatch(in: text, range: NSRange(location: 0, length: ns.length)),
-              m.numberOfRanges > 1 else { return nil }
-        return ns.substring(with: m.range(at: 1))
+    enum SaveError: LocalizedError {
+        case invalidKey
+        var errorDescription: String? { "API Key 必须是有效的单行凭证" }
     }
 
-    /// Pull the token/issuer out of the block-style YAML record
-    /// `deepseek-account-platform/default:` in ~/.dsh/.credentials.yaml.
+    /// Write a 0600 temporary file and atomically replace the old key. A failure
+    /// leaves the previous key intact and is surfaced to the settings dialog.
+    static func saveAPIKey(_ raw: String, to destination: URL = PetPaths.userKeyURL) throws {
+        let value = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard isValidToken(value) else { throw SaveError.invalidKey }
+        let fm = FileManager.default
+        let directory = destination.deletingLastPathComponent()
+        try fm.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        let temporary = directory.appendingPathComponent(".apikey-" + UUID().uuidString)
+        defer { try? fm.removeItem(at: temporary) }
+        guard fm.createFile(atPath: temporary.path, contents: Data(value.utf8),
+                            attributes: [.posixPermissions: 0o600]) else {
+            throw CocoaError(.fileWriteUnknown)
+        }
+        // POSIX rename atomically replaces a destination file (or a symlink),
+        // preserving the restrictive mode without a world-readable interval.
+        guard rename(temporary.path, destination.path) == 0 else {
+            throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno))
+        }
+    }
+
+    static func yamlAPIKey(from yaml: String) -> String? {
+        let matches = yaml.components(separatedBy: .newlines).compactMap(mappingLine)
+            .filter { $0.key == "DEEPSEEK_API_KEY" }
+        guard matches.count == 1, let value = scalar(matches[0].value), isValidToken(value) else { return nil }
+        return value
+    }
+
+    /// Deliberately limited block-YAML reader for DSH's credential file. It
+    /// handles comments/quoted scalars and only direct children of the grant.
     static func accountGrant(from yaml: String) -> (token: String, issuer: String)? {
         let lines = yaml.components(separatedBy: .newlines)
-        for (i, line) in lines.enumerated() {
-            guard line.trimmingCharacters(in: .whitespaces).hasPrefix("deepseek-account-platform/default:") else { continue }
-            let baseIndent = indentWidth(line)
-            var token: String?
-            var issuer: String?
-            var j = i + 1
-            while j < lines.count {
-                let l = lines[j]
-                let t = l.trimmingCharacters(in: .whitespaces)
-                if !t.isEmpty && indentWidth(l) <= baseIndent { break }
-                if t.hasPrefix("token:")  { token  = scalar(t, key: "token:") }
-                if t.hasPrefix("issuer:") { issuer = scalar(t, key: "issuer:") }
-                j += 1
+        let grants = lines.enumerated().filter { mappingLine($0.element)?.key == "deepseek-account-platform/default" }
+        guard grants.count == 1, let grant = grants.first,
+              let header = mappingLine(grant.element), header.value.isEmpty else { return nil }
+        var fields: [String: String] = [:]
+        var childIndent: Int?
+        for line in lines.dropFirst(grant.offset + 1) {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.isEmpty || trimmed.hasPrefix("#") { continue }
+            let indent = line.prefix { $0 == " " }.count
+            if indent <= header.indent { break }
+            guard let item = mappingLine(line) else { continue }
+            if childIndent == nil { childIndent = item.indent }
+            guard item.indent == childIndent, ["token", "issuer"].contains(item.key) else { continue }
+            guard fields[item.key] == nil, let value = scalar(item.value) else { return nil }
+            fields[item.key] = value
+        }
+        guard let token = fields["token"], isValidToken(token), let issuer = fields["issuer"], !issuer.isEmpty else { return nil }
+        return (token, issuer)
+    }
+
+    private struct MappingLine {
+        let indent: Int
+        let key: String
+        let value: String
+    }
+
+    private static func mappingLine(_ line: String) -> MappingLine? {
+        let indent = line.prefix { $0 == " " }.count
+        let text = String(line.dropFirst(indent))
+        guard !text.isEmpty, !text.hasPrefix("#"), !text.hasPrefix("\t") else { return nil }
+        var quote: Character?
+        var escaped = false
+        for index in text.indices {
+            let character = text[index]
+            if escaped { escaped = false; continue }
+            if character == "\\", quote == "\"" { escaped = true; continue }
+            if character == "\"" || character == "'" {
+                if quote == character { quote = nil }
+                else if quote == nil { quote = character }
+                continue
             }
-            if let tk = token, let isr = issuer, !tk.isEmpty, !isr.isEmpty {
-                return (tk, isr)
+            if character == ":", quote == nil {
+                let next = text.index(after: index)
+                guard next == text.endIndex || text[next].isWhitespace else { continue }
+                guard let key = scalar(String(text[..<index])) else { return nil }
+                let value = stripComment(String(text[next...])).trimmingCharacters(in: .whitespaces)
+                return MappingLine(indent: indent, key: key, value: value)
             }
         }
         return nil
     }
 
-    private static func indentWidth(_ line: String) -> Int {
-        line.prefix { $0 == " " || $0 == "\t" }.count
+    private static func stripComment(_ text: String) -> String {
+        var quote: Character?
+        var escaped = false
+        for index in text.indices {
+            let character = text[index]
+            if escaped { escaped = false; continue }
+            if character == "\\", quote == "\"" { escaped = true; continue }
+            if character == "\"" || character == "'" {
+                if quote == character { quote = nil }
+                else if quote == nil { quote = character }
+            } else if character == "#", quote == nil,
+                      index == text.startIndex || text[text.index(before: index)].isWhitespace {
+                return String(text[..<index])
+            }
+        }
+        return text
     }
 
-    private static func scalar(_ line: String, key: String) -> String? {
-        var v = String(line.dropFirst(key.count)).trimmingCharacters(in: .whitespaces)
-        v = v.trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
-        return v.isEmpty ? nil : v
+    private static func scalar(_ raw: String) -> String? {
+        let text = stripComment(raw).trimmingCharacters(in: .whitespaces)
+        guard !text.isEmpty else { return nil }
+        if text.hasPrefix("\"") {
+            guard let data = text.data(using: .utf8),
+                  let value = try? JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed]) as? String else { return nil }
+            return value
+        }
+        if text.hasPrefix("'") {
+            guard text.count >= 2, text.hasSuffix("'") else { return nil }
+            let body = String(text.dropFirst().dropLast())
+            let value = body.replacingOccurrences(of: "''", with: "'")
+            guard !body.replacingOccurrences(of: "''", with: "").contains("'") else { return nil }
+            return value
+        }
+        guard !["null", "Null", "NULL", "~"].contains(text),
+              !"!&*[{|>".contains(text.first!) else { return nil }
+        return text
     }
 }
 
@@ -197,33 +306,33 @@ struct PetState {
     var pollSeconds: Double = 30
     var windowOrigin: CGPoint?
 
-    static func load() -> PetState {
+    static func load(from url: URL = PetPaths.stateURL) -> PetState {
         var s = PetState()
-        guard let data = try? Data(contentsOf: PetPaths.stateURL),
+        guard let data = try? Data(contentsOf: url),
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return s }
-        if let v = obj["sizeIndex"] as? Int { s.sizeIndex = v }
+        if let v = obj["sizeIndex"] as? Int, (0...3).contains(v) { s.sizeIndex = v }
         if let v = obj["snapOnRelease"] as? Bool { s.snapOnRelease = v }
         if let v = obj["soundOn"] as? Bool { s.soundOn = v }
-        if let v = obj["pollSeconds"] as? Double { s.pollSeconds = v }
-        if let x = obj["originX"] as? Double, let y = obj["originY"] as? Double {
+        if let v = obj["pollSeconds"] as? Double, v.isFinite { s.pollSeconds = min(300, max(10, v)) }
+        if let x = obj["originX"] as? Double, let y = obj["originY"] as? Double, x.isFinite, y.isFinite {
             s.windowOrigin = CGPoint(x: x, y: y)
         }
         return s
     }
 
-    func save() {
+    func save(to url: URL = PetPaths.stateURL) {
         var obj: [String: Any] = [
-            "sizeIndex": sizeIndex,
+            "sizeIndex": min(3, max(0, sizeIndex)),
             "snapOnRelease": snapOnRelease,
             "soundOn": soundOn,
-            "pollSeconds": pollSeconds,
+            "pollSeconds": pollSeconds.isFinite ? min(300, max(10, pollSeconds)) : 30,
         ]
-        if let o = windowOrigin {
+        if let o = windowOrigin, o.x.isFinite, o.y.isFinite {
             obj["originX"] = Double(o.x)
             obj["originY"] = Double(o.y)
         }
         if let data = try? JSONSerialization.data(withJSONObject: obj, options: [.prettyPrinted, .sortedKeys]) {
-            try? data.write(to: PetPaths.stateURL)
+            try? data.write(to: url, options: .atomic)
         }
     }
 }

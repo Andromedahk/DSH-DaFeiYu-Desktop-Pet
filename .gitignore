@@ -13,3 +13,4 @@ status.json
 .credentials.yaml
 *.pem
 *.key
+*.lock

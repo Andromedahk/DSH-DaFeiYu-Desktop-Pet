@@ -3,9 +3,9 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleName</key>
-	<string>DSH余额桌宠</string>
+	<string>DSH大肥鱼桌宠</string>
 	<key>CFBundleDisplayName</key>
-	<string>DSH余额桌宠</string>
+	<string>DSH大肥鱼桌宠</string>
 	<key>CFBundleIdentifier</key>
 	<string>local.dsh.balance-pet</string>
 	<key>CFBundleExecutable</key>
@@ -13,9 +13,9 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.0.0</string>
+	<string>1.1.0</string>
 	<key>CFBundleVersion</key>
-	<string>1</string>
+	<string>2</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>LSMinimumSystemVersion</key>
@@ -25,6 +25,6 @@
 	<key>NSHighResolutionCapable</key>
 	<true/>
 	<key>NSHumanReadableCopyright</key>
-	<string>Original macOS implementation. No third-party assets.</string>
+	<string>macOS port of VKmich16/V. Original pet artwork and audio retained with source attribution.</string>
 </dict>
 </plist>

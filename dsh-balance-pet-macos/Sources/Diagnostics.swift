@@ -26,19 +26,21 @@ enum Diagnostics {
         return check()
     }
 
-    /// Forget the saved window position so the next launch starts clean.
+    /// Reset just the position, preserving sound, size, and polling preferences.
     static func reset() -> Int32 {
-        let fm = FileManager.default
-        var removed: [String] = []
-        for url in [PetPaths.stateURL, PetPaths.statusURL] {
-            guard fm.fileExists(atPath: url.path) else { continue }
-            do { try fm.removeItem(at: url); removed.append(url.lastPathComponent) }
-            catch { print("could not remove \(url.path): \(error.localizedDescription)") }
+        do {
+            let lock = try InstanceLock(directory: PetPaths.support)
+            withExtendedLifetime(lock) {
+                var state = PetState.load()
+                state.windowOrigin = nil
+                state.save()
+            }
+            print("saved window position cleared; other settings preserved")
+            return 0
+        } catch {
+            print("cannot reset while this profile is running or unwritable; quit the pet first")
+            return 1
         }
-        print(removed.isEmpty ? "nothing to reset" : "removed: " + removed.joined(separator: ", "))
-        print("pet.log left in place: \(PetPaths.logURL.path)")
-        Log.write("reset: " + (removed.isEmpty ? "nothing to remove" : removed.joined(separator: ", ")))
-        return 0
     }
 
     /// Print the real NSScreen layout, which does not always match what
@@ -76,94 +78,34 @@ enum Diagnostics {
         BalanceReading(normalCny: cny, bonusCny: 0, spentCny: nil, raw: "")
     }
 
-    /// Advance the model until no real deduction is left to animate.
-    private static func drain(_ model: PetModel) {
-        for _ in 0..<6000 {
-            model.tick(1.0 / 60.0)
-            if model.displayedCents == model.realCents { return }
-        }
-    }
-
     static func selfTest() -> Int32 {
-        print("== accounting self-test ==")
+        _ = NSApplication.shared
+        failures = 0
+        print("== balance and animation regressions ==")
+        ModelSelfTests.run(expect)
+        print("\n== request scheduling regressions ==")
+        PollScheduleSelfTests.run(expect)
+        print("\n== network and credential fixtures (offline) ==")
+        failures += NetworkSelfTests.run()
 
-        let m = PetModel()
-        m.apply(reading: reading(30.00), snap: true)
-        expect(m.displayedCents == 3000, "first reading snaps to 3000 fen")
-
-        m.apply(reading: reading(29.99), snap: false)
-        drain(m)
-        expect(m.displayedCents == 2999, "a one-fen drop lands exactly on 2999")
-
-        m.apply(reading: reading(29.95), snap: false)
-        drain(m)
-        expect(m.displayedCents == 2995, "a five-fen drop walks down to 2995")
-
-        // No drift across many readings, including fractional fen values.
-        let m2 = PetModel()
-        m2.apply(reading: reading(50.00), snap: true)
-        var value = 50.00
-        for _ in 0..<150 {
-            value -= 0.01
-            m2.apply(reading: reading(value), snap: false)
-            drain(m2)
-        }
-        // 150 drops of one fen take 50.00 down to 48.50 exactly.
-        expect(m2.displayedCents == 4850,
-               "150 successive drops leave no drift (expected 4850, got \(m2.displayedCents.map(String.init) ?? "nil"), real \(m2.realCents.map(String.init) ?? "nil"))")
-
-        // Top-up snaps upward immediately.
-        let m3 = PetModel()
-        m3.apply(reading: reading(10.00), snap: true)
-        m3.apply(reading: reading(25.00), snap: false)
-        expect(m3.displayedCents == 2500, "a top-up snaps straight up")
-        expect(m3.topupTime > 0, "a top-up triggers the celebration")
-
-        // A fractional balance rounds to the nearest fen.
-        let m4 = PetModel()
-        m4.apply(reading: BalanceReading(normalCny: 38.6177, bonusCny: 0, spentCny: nil, raw: ""), snap: true)
-        expect(m4.displayedCents == 3862, "38.6177 renders as 38.62")
-
-        // Bonus wallet is added to the total.
-        let m5 = PetModel()
-        m5.apply(reading: BalanceReading(normalCny: 10.00, bonusCny: 5.50, spentCny: nil, raw: ""), snap: true)
-        expect(m5.displayedCents == 1550, "bonus wallet is added to the balance")
-
-        // A demo never moves the real balance.
-        let m6 = PetModel()
-        m6.apply(reading: reading(20.00), snap: true)
-        m6.playDemo(times: 5)
-        for _ in 0..<400 { m6.tick(1.0 / 60.0) }
-        expect(m6.displayedCents == 2000, "a demo returns to the true balance")
-
-        // Click-through: the floating lane and the transparent corners must let
-        // clicks reach whatever is behind the pet.
+        print("\n== bundled artwork, audio, and hit testing ==")
+        expect(PetAssets.sprite?.image.width == 1024, "original 1024px sprite loads")
+        expect(PetAssets.sprite?.isOpaque(at: CGPoint(x: 0.5, y: 0.5)) == true,
+               "original sprite body is interactive")
+        expect(PetAssets.sprite?.isOpaque(at: CGPoint(x: 0.05, y: 0.95)) == false,
+               "original sprite transparent pixels remain click-through")
         let side: CGFloat = 150
         let win = NSWindow(contentRect: NSRect(x: 0, y: 0, width: side, height: side * (1 + PetView.floatBand)),
                            styleMask: [.borderless], backing: .buffered, defer: false)
         let pv = PetView(model: PetModel())
         win.contentView = pv
-        func hits(_ x: CGFloat, _ y: CGFloat) -> Bool {
-            win.contentView?.hitTest(NSPoint(x: x, y: y)) === pv
-        }
-        expect(hits(75, 75), "the body accepts clicks")
-        expect(!hits(75, 215), "the floating-number lane is click-through")
-        expect(!hits(1, 1), "the transparent corner is click-through")
-        expect(!hits(149, 149), "the opposite corner is click-through")
-
-        // Parsing the live payload shape.
-        let payload = """
-        {"code":0,"data":{"biz_code":0,"biz_data":{
-          "normal_wallets":[{"currency":"CNY","balance":"38.6177023600000000","token_estimation":"0"}],
-          "bonus_wallets":[{"currency":"CNY","balance":"1.5"}],
-          "total_costs":[{"currency":"CNY","amount":"31.38"}]}}}
-        """
-        if let data = payload.data(using: .utf8),
-           let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-            // Mirror BalanceClient.parseAccount via a real fetch path is not possible
-            // offline, so just assert the shape the parser walks.
-            expect((obj["data"] as? [String: Any])?["biz_data"] != nil, "account envelope has data.biz_data")
-        }
+        expect(pv.containsInteractivePoint(NSPoint(x: 75, y: 75)), "the body accepts clicks")
+        expect(!pv.containsInteractivePoint(NSPoint(x: 75, y: 215)), "floating numbers do not intercept clicks")
+        expect(!pv.containsInteractivePoint(NSPoint(x: 1, y: 1)), "the outside margin is click-through")
+        expect(!pv.containsInteractivePoint(NSPoint(x: 15, y: 135)), "transparent pixels inside the sprite square are click-through")
+        if let url = PetPaths.soundURL, let sound = NSSound(contentsOf: url, byReference: false) {
+            expect(url.lastPathComponent == "hit.mp3" && sound.duration > 0, "original MP3 loads and decodes")
+        } else { expect(false, "original MP3 loads and decodes") }
 
         print(failures == 0 ? "\nALL PASS" : "\n\(failures) FAILURE(S)")
         return failures == 0 ? 0 : 1
@@ -188,7 +130,7 @@ enum Diagnostics {
             print(String(format: "normal CNY: %.4f", r.normalCny))
             print(String(format: "bonus  CNY: %.4f", r.bonusCny))
             print(String(format: "TOTAL  CNY: %.6f  -> displays as %.2f",
-                         r.totalCny, Double(Int((r.totalCny * 100).rounded())) / 100))
+                         r.totalCny, Double(r.totalCents ?? 0) / 100))
             if let s = r.spentCny { print(String(format: "spent  CNY: %.2f", s)) }
             return 0
         } catch let e as FetchError {
@@ -202,21 +144,27 @@ enum Diagnostics {
 
     // MARK: - Off-screen render
 
-    private static func render(_ view: NSView, to url: URL) -> Bool {
+    private static func render(_ view: NSView, to url: URL, transparent: Bool = false) -> Bool {
         let bounds = view.bounds
         guard let rep = view.bitmapImageRepForCachingDisplay(in: bounds) else { return false }
         view.cacheDisplay(in: bounds, to: rep)
 
-        let canvas = NSImage(size: bounds.size)
-        canvas.lockFocus()
-        NSColor(srgbRed: 0.90, green: 0.91, blue: 0.93, alpha: 1).setFill()
-        NSBezierPath(rect: NSRect(origin: .zero, size: bounds.size)).fill()
-        rep.draw(in: NSRect(origin: .zero, size: bounds.size))
-        canvas.unlockFocus()
+        if transparent {
+            guard let png = rep.representation(using: .png, properties: [:]) else { return false }
+            return (try? png.write(to: url)) != nil
+        }
 
-        guard let tiff = canvas.tiffRepresentation,
-              let bitmap = NSBitmapImageRep(data: tiff),
-              let png = bitmap.representation(using: .png, properties: [:]) else { return false }
+        guard let source = rep.cgImage,
+              let canvas = CGContext(data: nil, width: rep.pixelsWide, height: rep.pixelsHigh,
+                                     bitsPerComponent: 8, bytesPerRow: 0,
+                                     space: CGColorSpaceCreateDeviceRGB(),
+                                     bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return false }
+        let pixels = CGRect(x: 0, y: 0, width: rep.pixelsWide, height: rep.pixelsHigh)
+        canvas.setFillColor(NSColor(srgbRed: 0.90, green: 0.91, blue: 0.93, alpha: 1).cgColor)
+        canvas.fill(pixels)
+        canvas.draw(source, in: pixels)
+        guard let image = canvas.makeImage(),
+              let png = NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:]) else { return false }
         return (try? png.write(to: url)) != nil
     }
 
@@ -269,9 +217,28 @@ enum Diagnostics {
         let v4 = makeView(off)
         if render(v4, to: dir.appendingPathComponent("04-offline.png")) { written.append("04-offline.png") }
 
+        let transparent = "05-transparent.png"
+        if render(v1, to: dir.appendingPathComponent(transparent), transparent: true) { written.append(transparent) }
+        for preset in PetController.sizePresets {
+            let sized = PetView(model: idle)
+            sized.frame = NSRect(x: 0, y: 0, width: preset.side, height: preset.side * (1 + PetView.floatBand))
+            let name = "size-\(Int(preset.side))pt.png"
+            if render(sized, to: dir.appendingPathComponent(name)) { written.append(name) }
+        }
+        for (name, amount) in [("06-long-balance.png", 1_234_567.89), ("07-negative-balance.png", -0.05)] {
+            let model = PetModel()
+            model.apply(reading: reading(amount), snap: true)
+            if render(makeView(model), to: dir.appendingPathComponent(name)) { written.append(name) }
+        }
+        let stale = PetModel()
+        stale.apply(reading: reading(38.61), snap: true)
+        stale.fail(.transport("离线示例"))
+        let staleName = "08-disconnected.png"
+        if render(makeView(stale), to: dir.appendingPathComponent(staleName)) { written.append(staleName) }
+
         print("wrote \(written.count) snapshot(s) to \(dir.path)")
         for w in written { print("  " + w) }
-        return written.count == 4 ? 0 : 1
+        return written.count == 12 ? 0 : 1
     }
 
     // MARK: - Live status
@@ -290,10 +257,9 @@ enum Diagnostics {
             print("status file is not valid JSON")
             return 1
         }
-        if let updated = obj["updatedAt"] as? Double {
-            let age = Date().timeIntervalSince1970 - updated
-            print(String(format: "status age: %.1fs%@", age, age > 5 ? "  <-- stale, pet is probably not running" : ""))
-        }
+        let age = Date().timeIntervalSince1970 - (obj["updatedAt"] as? Double ?? 0)
+        let live = (obj["running"] as? Bool == true) && age >= -5 && age <= 5
+        print(String(format: "status age: %.1fs%@", age, live ? "" : "  <-- stopped or stale"))
         let keys = ["running", "pid", "connected", "display", "real", "statusText",
                     "lastError", "credential", "spentCny",
                     "windowX", "windowY", "windowW", "windowH",
@@ -301,6 +267,6 @@ enum Diagnostics {
         for k in keys {
             if let v = obj[k] { print("  \(k.padding(toLength: 15, withPad: " ", startingAt: 0)) \(v)") }
         }
-        return 0
+        return live ? 0 : 1
     }
 }

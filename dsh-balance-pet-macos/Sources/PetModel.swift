@@ -1,21 +1,18 @@
 import AppKit
 
-/// Balance bookkeeping + animation state.
-///
-/// Money is kept in **cents** so stepping the display down one fen at a time can
-/// never accumulate floating point drift.
+/// Server accounting and animation are kept separate: a menu rehearsal must
+/// never consume real deductions or make an unchanged poll look like a top-up.
 final class PetModel {
-
     struct FloatLabel {
         let text: String
         let color: NSColor
         var age: Double
-        var x: CGFloat          // 0..1, horizontal centre
+        var x: CGFloat
     }
 
     // MARK: Accounting
 
-    private(set) var displayedCents: Int?
+    private var bookedCents: Int?
     private(set) var realCents: Int?
     private(set) var spentCny: Double?
     private(set) var connected = false
@@ -24,8 +21,23 @@ final class PetModel {
     private(set) var credentialSource: String?
     private(set) var lastUpdate: Date?
 
-    private var pendingSteps = 0      // real deductions still to animate
-    private var demoRemaining = 0     // menu demo, visual only
+    private var pendingSteps = 0
+    private var demoRemaining = 0
+    private var demoOffset = 0
+    private var demoRestoreTime: Double = 0
+    private static let maxPendingSteps = 400
+    private static let maxDemoSteps = 200
+
+    var displayedCents: Int? {
+        guard let booked = bookedCents else { return nil }
+        // Rehearsals stop visually at zero, but a genuine negative balance is
+        // preserved. The subtraction is checked even for an extreme input.
+        let (value, overflow) = booked.subtractingReportingOverflow(demoOffset)
+        return max(min(0, booked), overflow ? Int.min : value)
+    }
+
+    var displayString: String { displayedCents.map(Self.fenString) ?? "--" }
+    var realString: String { realCents.map(Self.fenString) ?? "--" }
 
     // MARK: Animation
 
@@ -34,70 +46,58 @@ final class PetModel {
     private(set) var flashTime: Double = 0
     private(set) var topupTime: Double = 0
     private(set) var clock: Double = 0
-
     private var stepCooldown: Double = 0
+
     let stepInterval: Double = 0.2
     let hitDuration: Double = 0.55
-    /// How long a floating number lives. Kept just above stepInterval * 5 so a
-    /// full combo is on screen at once without the labels piling up.
     let floatLifetime: Double = 0.95
 
     /// Called once per animated deduction so the controller can play the sound.
     var onHit: (() -> Void)?
 
-    var displayString: String {
-        guard let c = displayedCents else { return "--" }
-        return String(format: "%.2f", Double(c) / 100.0)
+    var needsAnimationFrame: Bool {
+        pendingSteps > 0 || demoRemaining > 0 || demoRestoreTime > 0 ||
+        !floating.isEmpty || shakeTime > 0 || flashTime > 0 || topupTime > 0
     }
 
-    var realString: String {
-        guard let c = realCents else { return "--" }
-        return String(format: "%.2f", Double(c) / 100.0)
-    }
+    // MARK: Server readings
 
-    // MARK: - Server readings
-
-    /// `snap` = jump straight to the value (first read, or the "refresh now" menu item).
-    /// Otherwise a drop walks down one fen at a time, each step animated.
+    /// `snap` discards queued animation and rehearsals (first read/manual refresh).
     func apply(reading: BalanceReading, snap: Bool) {
-        let cents = Int((reading.totalCny * 100).rounded())
+        guard let cents = reading.totalCents else {
+            fail(.parse("余额数值超出可显示范围"))
+            return
+        }
+        let previousReal = realCents
         realCents = cents
-        spentCny = reading.spentCny
+        spentCny = reading.spentCny.flatMap { $0.isFinite ? $0 : nil }
         connected = true
         statusText = "已连接"
         lastError = nil
         lastUpdate = Date()
 
-        guard let current = displayedCents else {
-            displayedCents = cents
-            pendingSteps = 0
+        guard !snap, let current = bookedCents, let previous = previousReal else {
+            forceSnapToReal()
             return
         }
 
-        if snap {
-            displayedCents = cents
-            pendingSteps = 0
-            return
-        }
-
-        if cents < current {
-            let steps = current - cents
-            if steps > 400 {
-                // Absurd jump (first poll after a long sleep, or a correction):
-                // snapping beats animating thousands of hits.
-                displayedCents = cents
-                pendingSteps = 0
-                Log.write("jump too large (\(steps) fen), snapping")
+        if cents > previous {
+            // Compare consecutive server readings, not the lagging animation or
+            // rehearsal display. A credit may still be below the printed value.
+            forceSnapToReal()
+            topupTime = 0.9
+            let (credit, overflow) = cents.subtractingReportingOverflow(previous)
+            appendLabel(overflow ? "余额已更新" : "+" + Self.fenString(credit), color: .systemGreen)
+        } else if cents < current {
+            let (steps, overflow) = current.subtractingReportingOverflow(cents)
+            if overflow || steps > Self.maxPendingSteps {
+                forceSnapToReal()
+                Log.write("balance jump exceeds animation limit; snapping")
             } else {
+                // Re-derive the outstanding amount: repeated polls never replay
+                // money already animated, and fresh deductions extend the queue.
                 pendingSteps = steps
             }
-        } else if cents > current {
-            // Top-up: snap up immediately and celebrate.
-            displayedCents = cents
-            pendingSteps = 0
-            topupTime = 0.9
-            floating.append(FloatLabel(text: "+" + fenString(cents - current),
-                                       color: NSColor.systemGreen, age: 0, x: 0.5))
         } else {
             pendingSteps = 0
         }
@@ -110,86 +110,121 @@ final class PetModel {
         Log.write("poll failed: \(error.describe)")
     }
 
-    func setNoCredential() {
+    /// Invalidate the old account before asynchronously reading a new credential.
+    func resetForCredentialChange() {
+        bookedCents = nil
+        realCents = nil
+        spentCny = nil
         connected = false
+        statusText = "连接中…"
+        lastError = nil
+        credentialSource = nil
+        lastUpdate = nil
+        clearQueue()
+        floating.removeAll()
+        shakeTime = 0
+        flashTime = 0
+        topupTime = 0
+    }
+
+    func setNoCredential() {
+        resetForCredentialChange()
         lastError = "找不到凭证"
         statusText = "未配置"
-        credentialSource = nil
     }
 
-    func setCredentialSource(_ s: String?) {
-        credentialSource = s
-    }
+    func setCredentialSource(_ source: String?) { credentialSource = source }
 
-    /// Right-click → 立即刷新余额 / 测试一次扣费.
     func forceSnapToReal() {
-        if let r = realCents { displayedCents = r }
+        bookedCents = realCents
+        clearQueue()
+    }
+
+    private func clearQueue() {
         pendingSteps = 0
-    }
-
-    func playOneHit() {
-        demoRemaining += 1
+        demoRemaining = 0
+        demoOffset = 0
+        demoRestoreTime = 0
         stepCooldown = 0
     }
 
-    /// 演示连续扣费 ▸ n 次
+    func playOneHit() { playDemo(times: 1) }
+
     func playDemo(times: Int) {
-        demoRemaining += max(1, min(times, 200))
-        stepCooldown = 0
+        let count = max(1, min(times, Self.maxDemoSteps))
+        // Bound the total queue, including repeated menu clicks. Preserve the
+        // existing cooldown so repeated clicks cannot bypass the 0.2 s rhythm.
+        demoRemaining = min(Self.maxDemoSteps, demoRemaining + count)
+        demoRestoreTime = 0
     }
 
-    // MARK: - Frame tick
+    // MARK: Frame tick
 
     func tick(_ dt: Double) {
-        clock += dt
-        stepCooldown -= dt
+        guard dt.isFinite, dt >= 0 else { return }
+        // A wake from sleep should not produce a burst of hundreds of sounds.
+        // The controller uses the same limit for its frame clock.
+        let elapsed = min(dt, 0.1)
+        clock += elapsed
+        shakeTime = max(0, shakeTime - elapsed)
+        flashTime = max(0, flashTime - elapsed)
+        topupTime = max(0, topupTime - elapsed)
 
-        if shakeTime > 0 { shakeTime = max(0, shakeTime - dt) }
-        if flashTime > 0 { flashTime = max(0, flashTime - dt) }
-        if topupTime > 0 { topupTime = max(0, topupTime - dt) }
+        for i in floating.indices { floating[i].age += elapsed }
+        floating.removeAll { $0.age >= floatLifetime }
 
-        for i in floating.indices { floating[i].age += dt }
-        floating.removeAll { $0.age > floatLifetime }
-        if floating.count > 60 { floating.removeFirst(floating.count - 60) }
-
-        if stepCooldown <= 0 {
-            if demoRemaining > 0 {
-                demoRemaining -= 1
-                performStep(revertWhenDone: demoRemaining == 0)
-            } else if pendingSteps > 0 {
-                pendingSteps -= 1
-                performStep(revertWhenDone: false)
-            }
+        if demoRestoreTime > 0 {
+            demoRestoreTime = max(0, demoRestoreTime - elapsed)
+            if demoRestoreTime == 0 { demoOffset = 0 }
         }
-    }
 
-    private func performStep(revertWhenDone: Bool) {
-        stepCooldown = stepInterval
+        guard pendingSteps > 0 || demoRemaining > 0 else {
+            stepCooldown = max(0, stepCooldown - elapsed)
+            return
+        }
 
-        if revertWhenDone {
-            // End of a menu demo: put the readout back on the true balance.
-            forceSnapToReal()
-        } else if let c = displayedCents {
-            displayedCents = max(0, c - 1)
+        stepCooldown -= elapsed
+        guard stepCooldown <= 1e-9 else { return }
+        // Keep the fractional frame remainder. Resetting to exactly 0.2 here
+        // silently stretches each cue to 13 frames on a 60 Hz display.
+        stepCooldown = max(0, stepCooldown + stepInterval)
+        if pendingSteps > 0, let booked = bookedCents, let real = realCents, booked > real {
+            bookedCents = booked - 1 // Safe because booked is strictly above real.
+            pendingSteps -= 1
+        } else if demoRemaining > 0 {
+            demoRemaining -= 1
+            if demoOffset < Int.max { demoOffset += 1 }
+            if demoRemaining == 0 { demoRestoreTime = hitDuration }
+        } else {
+            pendingSteps = 0
+            return
         }
 
         shakeTime = hitDuration
         flashTime = hitDuration
-        floating.append(FloatLabel(text: "-0.01", color: NSColor.systemRed, age: 0, x: 0.5))
+        appendLabel("-0.01", color: .systemRed)
         onHit?()
     }
 
-    // MARK: - Animation helpers used by the view
-
-    /// 0 at the end of the hurt animation, 1 at the moment of impact.
-    var impact: Double {
-        guard shakeTime > 0 else { return 0 }
-        let t = hitDuration - shakeTime        // elapsed
-        if t < 0.08 { return min(1, t / 0.08) }  // fast attack
-        return max(0, 1 - (t - 0.08) / (hitDuration - 0.08))
+    private func appendLabel(_ text: String, color: NSColor) {
+        floating.append(FloatLabel(text: text, color: color, age: 0, x: 0.5))
+        if floating.count > 60 { floating.removeFirst(floating.count - 60) }
     }
 
-    private func fenString(_ fen: Int) -> String {
-        String(format: "%.2f", Double(fen) / 100.0)
+    // MARK: View helpers
+
+    var impact: Double {
+        guard shakeTime > 0 else { return 0 }
+        let elapsed = hitDuration - shakeTime
+        if elapsed < 0.08 { return min(1, elapsed / 0.08) }
+        return max(0, 1 - (elapsed - 0.08) / (hitDuration - 0.08))
+    }
+
+    /// Integer formatting preserves cents even above Double's exact range and
+    /// handles Int.min without trying to negate it.
+    private static func fenString(_ fen: Int) -> String {
+        let magnitude = fen.magnitude
+        let fraction = magnitude % 100
+        return "\(fen < 0 ? "-" : "")\(magnitude / 100).\(fraction < 10 ? "0" : "")\(fraction)"
     }
 }
