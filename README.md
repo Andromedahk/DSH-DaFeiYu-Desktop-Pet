@@ -8,21 +8,43 @@
 
 以下为应用实际渲染的四角色拼图，使用统一示例余额，不包含真实账号信息。
 
-![四个角色使用预览](dsh-balance-pet-macos/docs/screenshots/four-characters-usage.png)
+[![四个角色使用预览](dsh-balance-pet-macos/docs/previews/four-characters-usage.webp)](dsh-balance-pet-macos/docs/screenshots/four-characters-usage.png)
 
-| 蓝色大肥鱼 | GPT龙娘 |
-| --- | --- |
-| ![蓝色大肥鱼](dsh-balance-pet-macos/Resources/sprite.png) | ![GPT龙娘](dsh-balance-pet-macos/Resources/sprite-gpt.png) |
-| 大小姐Claude | 北美猫娘Gemini |
-| ![大小姐Claude](dsh-balance-pet-macos/Resources/sprite-claude.png) | ![北美猫娘Gemini](dsh-balance-pet-macos/Resources/sprite-gemini.png) |
+<table>
+  <tr><th width="50%">蓝色大肥鱼</th><th width="50%">GPT龙娘</th></tr>
+  <tr>
+    <td align="center" width="50%"><a href="dsh-balance-pet-macos/Resources/sprite.png"><img src="dsh-balance-pet-macos/docs/previews/sprite.webp" alt="蓝色大肥鱼" width="360" height="240"></a></td>
+    <td align="center" width="50%"><a href="dsh-balance-pet-macos/Resources/sprite-gpt.png"><img src="dsh-balance-pet-macos/docs/previews/sprite-gpt.webp" alt="GPT龙娘" width="360" height="240"></a></td>
+  </tr>
+  <tr><th width="50%">大小姐Claude</th><th width="50%">北美猫娘Gemini</th></tr>
+  <tr>
+    <td align="center" width="50%"><a href="dsh-balance-pet-macos/Resources/sprite-claude.png"><img src="dsh-balance-pet-macos/docs/previews/sprite-claude.webp" alt="大小姐Claude" width="360" height="240"></a></td>
+    <td align="center" width="50%"><a href="dsh-balance-pet-macos/Resources/sprite-gemini.png"><img src="dsh-balance-pet-macos/docs/previews/sprite-gemini.webp" alt="北美猫娘Gemini" width="360" height="240"></a></td>
+  </tr>
+</table>
 
 四张原始透明 PNG 均包含在 [`Resources`](dsh-balance-pet-macos/Resources) 文件夹中；上表图片可点击查看原图。
 
-**切换方法：**右键桌宠，或点击菜单栏 **¥ → 切换角色**。选择立即生效，重启后自动恢复；切换保留余额、动画、窗口位置和尺寸。
+**切换方法：** 右键桌宠，或点击菜单栏 **¥ → 切换角色**。选择立即生效，重启后自动恢复；切换保留余额、动画、窗口位置和尺寸。
 
 蓝色大肥鱼在未配置 API Key / 账号凭证、连接中或连接失败时，改为显示抱盆图，不显示余额标题、金额、状态点或金额飘字；连接成功后自动恢复手持平板和余额显示。其他三个角色保持原有显示方式。
 
-![大肥鱼未连接状态](dsh-balance-pet-macos/docs/screenshots/deepseek-offline.png)
+[![大肥鱼未连接状态](dsh-balance-pet-macos/docs/previews/deepseek-offline.webp)](dsh-balance-pet-macos/docs/screenshots/deepseek-offline.png)
+
+## 更新记录
+
+### v1.3.1 · 离线抱盆状态
+
+- 蓝色大肥鱼在未配置 API Key / 账号凭证、连接中或连接失败时，使用上方抱盆图。
+- 隐藏余额标题、金额、状态点及金额飘字；连接成功后自动恢复平板图和余额。
+- 透明点击区域随图片切换，其他三个角色不变。
+- README 使用轻量预览图与固定尺寸的双列表格，点击图片仍可查看完整 PNG。
+
+### v1.3.0 · 四角色切换
+
+- 新增 GPT龙娘、大小姐Claude、北美猫娘Gemini，与蓝色大肥鱼共四个角色。
+- 通过桌宠右键菜单或菜单栏即时切换，重启后保留选择。
+- 切换保留余额、动画、位置及尺寸；加入四角色使用截图和透明原图展示。
 
 ## 下载与运行
 

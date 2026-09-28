@@ -47,11 +47,11 @@ open 'dist/DSH大肥鱼桌宠.app'
 | 大小姐Claude | 橙发、花饰与象牙白服装 |
 | 北美猫娘Gemini | 蓝紫发、异色瞳与毛绒尾巴 |
 
-![四个角色与示例余额](docs/screenshots/four-characters-usage.png)
+[![四个角色与示例余额](docs/previews/four-characters-usage.webp)](docs/screenshots/four-characters-usage.png)
 
 蓝色大肥鱼在未配置 API Key / 账号凭证、连接中或连接失败时，改为显示抱盆图，不显示余额标题、金额、状态点或金额飘字；连接成功后自动恢复手持平板和余额显示。其他三个角色保持原有显示方式。
 
-![大肥鱼未连接状态](docs/screenshots/deepseek-offline.png)
+[![大肥鱼未连接状态](docs/previews/deepseek-offline.webp)](docs/screenshots/deepseek-offline.png)
 
 ## 凭证与余额
 
@@ -121,3 +121,7 @@ BIN='./dist/DSH大肥鱼桌宠.app/Contents/MacOS/DSHBalancePet'
 上游原始代码及素材完整保存在仓库的 `原版（Windows版）`，来源见 [素材说明](Resources/README.md)。旧音效生成脚本保留供参考，默认构建不再使用。
 
 本应用使用本地临时签名，未经过 Apple 开发者签名与公证。构建通过不等于所有 macOS/Intel 机型均已实测；离屏截图也不等于所有跨应用鼠标交互均已验证。
+
+## 更新记录
+
+版本变更统一记录在[仓库首页的更新记录](../README.md#更新记录)，包括 v1.3.1 离线抱盆状态和 v1.3.0 四角色切换。
