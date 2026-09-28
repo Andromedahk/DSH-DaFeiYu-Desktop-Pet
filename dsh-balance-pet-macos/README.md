@@ -47,7 +47,7 @@ open 'dist/DSH大肥鱼桌宠.app'
 | 大小姐Claude | 橙发、花饰与象牙白服装 |
 | 北美猫娘Gemini | 蓝紫发、异色瞳与毛绒尾巴 |
 
-![三种新增角色与示例余额](docs/screenshots/character-selection.png)
+![四个角色与示例余额](docs/screenshots/four-characters-usage.png)
 
 ## 凭证与余额
 

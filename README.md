@@ -1,23 +1,64 @@
 # DSH大肥鱼桌宠
 
-用于 DeepSeek Harness 的 macOS 原生余额桌宠，基于 [VKmich16/V](https://github.com/VKmich16/V) 的 Windows 原版移植。1.3.0 支持在蓝色大肥鱼、GPT龙娘、大小姐Claude、北美猫娘Gemini之间切换，余额显示在各自手持的平板内，保留原版打击音效。
+一个用于 **DeepSeek Harness** 的 macOS 原生余额桌宠。角色手持平板显示余额，扣费时播放受击动画与原版音效，充值时显示提示。使用 Swift + AppKit 开发，无第三方运行时依赖。
 
-![蓝色大肥鱼桌宠](dsh-balance-pet-macos/docs/screenshots/01-connected.png)
+**v1.3.0 新增三个角色**，现在可以在蓝色大肥鱼、GPT龙娘、大小姐Claude、北美猫娘Gemini之间自由切换。
 
-右键桌宠或点击菜单栏 ¥ → **切换角色**；选中后立即显示，重启后保留选择。
+## 四个角色
 
-- [macOS 版源码与使用说明](dsh-balance-pet-macos/README.md)
-- [代码审查与验证记录](dsh-balance-pet-macos/docs/REVIEW.md)
-- [Windows 原版存档](原版（Windows版）/DSH余额桌宠/先看这里（快速开始）.md)
+以下为应用实际渲染的四角色拼图，使用统一示例余额，不包含真实账号信息。
 
-当前维护版本仅支持 macOS 13 及以上，使用 Swift + AppKit，无第三方运行时依赖。它作为独立桌面程序运行，可读取 DeepSeek Harness 的凭证来显示余额。
+![四个角色使用预览](dsh-balance-pet-macos/docs/screenshots/four-characters-usage.png)
+
+| 蓝色大肥鱼 | GPT龙娘 |
+| --- | --- |
+| ![蓝色大肥鱼](dsh-balance-pet-macos/Resources/sprite.png) | ![GPT龙娘](dsh-balance-pet-macos/Resources/sprite-gpt.png) |
+| 大小姐Claude | 北美猫娘Gemini |
+| ![大小姐Claude](dsh-balance-pet-macos/Resources/sprite-claude.png) | ![北美猫娘Gemini](dsh-balance-pet-macos/Resources/sprite-gemini.png) |
+
+四张原始透明 PNG 均包含在 [`Resources`](dsh-balance-pet-macos/Resources) 文件夹中；上表图片可点击查看原图。
+
+**切换方法：**右键桌宠，或点击菜单栏 **¥ → 切换角色**。选择立即生效，重启后自动恢复；切换保留余额、动画、窗口位置和尺寸。
+
+## 下载与运行
+
+前往 [最新 Release](https://github.com/Andromedahk/DSH-DaFeiYu-Desktop-Pet/releases/latest)，下载 `DSH-DaFeiYu-macOS.zip`，解压后将 **DSH大肥鱼桌宠.app** 放入“应用程序”并打开。
+
+- 支持 **macOS 13 及以上**；发布包同时包含 Apple Silicon 与 Intel 架构。
+- 应用可读取本机 DeepSeek Harness 凭证，独立运行，无需持续打开 DSH；具体配置见 [macOS 使用说明](dsh-balance-pet-macos/README.md#凭证与余额)。
+- 应用使用本地临时签名，尚未经过 Apple 开发者签名和公证。首次打开可能被系统拦截；确认下载来源后，可在“系统设置 → 隐私与安全性”中允许打开。
+
+## 日常操作
+
+| 操作 | 功能 |
+| --- | --- |
+| 左键拖动 | 移动桌宠；默认松手吸附当前屏幕左下角，可在菜单关闭 |
+| 右键 / Control + 单击 | 打开菜单，切换角色、尺寸及音效等 |
+| 菜单栏 ¥ | 查看余额状态、刷新余额或打开操作菜单 |
+| 测试一次扣费 / 演示连续扣费 | 本地演示动画，不发起真实扣费 |
+
+角色透明区域支持鼠标穿透，余额文字随手持平板倾斜和震动，长金额自动缩小显示。
+
+## 从源码构建
+
+安装 Xcode Command Line Tools 后运行：
 
 ```sh
 cd dsh-balance-pet-macos
-./build.sh
+ARCH=universal ./build.sh
+./verify.sh
 open "dist/DSH大肥鱼桌宠.app"
 ```
 
-原版代码与素材保留在 `原版（Windows版）` 目录；缓存、编译产物及个人凭证不纳入版本控制。
+省略 `ARCH=universal` 时只构建当前机器架构。离线验证使用独立临时配置，检查四角色资源、切换绘制、配置恢复、余额逻辑、签名和启动行为。
 
-感谢原作者 VKmich16。上游暂未附带许可证；本仓库保留来源说明，不对上游代码和素材另行授予许可。
+## 文档与来源
+
+- [macOS 版源码与完整使用说明](dsh-balance-pet-macos/README.md)
+- [代码审查与验证记录](dsh-balance-pet-macos/docs/REVIEW.md)
+- [角色素材来源与文件哈希](dsh-balance-pet-macos/Resources/README.md)
+- [Windows 原版存档](原版（Windows版）/DSH余额桌宠/先看这里（快速开始）.md)
+
+本项目基于 [VKmich16/V](https://github.com/VKmich16/V) 的 Windows 原版移植，感谢原作者。原版代码和素材完整保留在 `原版（Windows版）` 目录；缓存、编译产物及个人凭证不纳入版本控制。
+
+上游暂未附带许可证；本仓库保留来源说明，不对上游代码和素材另行授予许可。
