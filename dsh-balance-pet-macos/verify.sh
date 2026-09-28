@@ -26,7 +26,7 @@ trap cleanup EXIT
 "$BIN" --selftest | tee "$OUT/selftest.txt"
 "$BIN" --snapshot "$OUT/snapshots"
 codesign --verify --strict "$ROOT/dist/DSH大肥鱼桌宠.app"
-cmp "$ROOT/Resources/sprite.png" "$ROOT/../原版（Windows版）/DSH余额桌宠/sprite.png"
+[[ "$(shasum -a 256 "$ROOT/Resources/sprite.png" | cut -d ' ' -f 1)" == a98329d36dd9169a1856f3a396bc9e602ed1a739bd3097eead1b744c6bb3dd71 ]]
 cmp "$ROOT/Resources/hit.mp3" "$ROOT/../原版（Windows版）/DSH余额桌宠/hit.mp3"
 cmp "$ROOT/Resources/sprite.png" "$ROOT/dist/DSH大肥鱼桌宠.app/Contents/Resources/sprite.png"
 cmp "$ROOT/Resources/hit.mp3" "$ROOT/dist/DSH大肥鱼桌宠.app/Contents/Resources/hit.mp3"
@@ -70,4 +70,4 @@ if plutil -extract originX raw "$TEST_PROFILE/state.json" >/dev/null 2>&1; then
   echo 'FAIL: reset left a saved origin' >&2
   exit 1
 fi
-echo 'PASS: bundle, original assets, offline startup, duplicate prevention, and position-only reset'
+echo 'PASS: bundle, tail-completed artwork, original audio, offline startup, duplicate prevention, and position-only reset'

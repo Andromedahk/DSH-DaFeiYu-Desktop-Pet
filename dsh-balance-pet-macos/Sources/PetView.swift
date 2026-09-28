@@ -1,6 +1,6 @@
 import AppKit
 
-/// Original blue 大肥鱼 artwork, with the readout mapped onto its tilted tablet.
+/// Tail-completed 大肥鱼 artwork, with the readout mapped onto its tilted tablet.
 /// The upper band is reserved for floating amounts and always passes clicks through.
 final class PetView: NSView {
     weak var controller: PetController?
@@ -11,11 +11,9 @@ final class PetView: NSView {
     private var didDrag = false
     private(set) var isDragging = false
 
-    static let floatBand: CGFloat = 0.55
-
     init(model: PetModel) {
         self.model = model
-        super.init(frame: NSRect(x: 0, y: 0, width: 150, height: 150 * (1 + Self.floatBand)))
+        super.init(frame: NSRect(origin: .zero, size: PetLayout.windowSize(side: 150)))
         setAccessibilityElement(true)
         setAccessibilityRole(.image)
         setAccessibilityLabel("DSH 大肥鱼余额桌宠")
@@ -30,16 +28,14 @@ final class PetView: NSView {
 
     /// A small inset keeps the original art, including its outermost pixels,
     /// inside the window even at the peak of the hurt shake.
-    private var spriteRect: CGRect {
-        let side = bounds.width
-        return CGRect(x: side * 0.03, y: side * 0.03, width: side * 0.94, height: side * 0.94)
-    }
+    private var side: CGFloat { PetLayout.bodyHeight(in: bounds) }
+    private var spriteRect: CGRect { PetLayout.spriteRect(in: bounds) }
 
     private var shakeOffset: CGPoint {
         guard model.shakeTime > 0 else { return .zero }
         let elapsed = model.hitDuration - model.shakeTime
         let decay = CGFloat(max(0, model.shakeTime / model.hitDuration))
-        let amplitude = min(CGFloat(3.2), bounds.width * 0.025)
+        let amplitude = min(CGFloat(3.2), side * 0.025)
         return CGPoint(x: sin(elapsed * 24) * amplitude * decay,
                        y: cos(elapsed * 19) * amplitude * 0.875 * decay)
     }
@@ -48,7 +44,7 @@ final class PetView: NSView {
     /// ignoresMouseEvents update. Returning nil from hitTest alone does not
     /// guarantee delivery to another application's window.
     func containsInteractivePoint(_ point: NSPoint) -> Bool {
-        guard bounds.contains(point), point.y < bounds.width else { return false }
+        guard bounds.contains(point), point.y < bounds.minY + side else { return false }
         let offset = shakeOffset
         let local = CGPoint(x: point.x - offset.x, y: point.y - offset.y)
         let rect = spriteRect
@@ -109,10 +105,10 @@ final class PetView: NSView {
 
         if model.topupTime > 0 {
             let progress = 1 - CGFloat(model.topupTime / 0.9)
-            let rect = spriteRect.insetBy(dx: bounds.width * (0.03 + 0.06 * (1 - progress)),
-                                         dy: bounds.width * (0.03 + 0.06 * (1 - progress)))
+            let rect = spriteRect.insetBy(dx: side * (0.03 + 0.06 * (1 - progress)),
+                                         dy: side * (0.03 + 0.06 * (1 - progress)))
             ctx.setStrokeColor(NSColor.systemGreen.withAlphaComponent(0.8 * (1 - progress)).cgColor)
-            ctx.setLineWidth(bounds.width * 0.015)
+            ctx.setLineWidth(side * 0.015)
             ctx.strokeEllipse(in: rect)
         }
 
@@ -136,7 +132,7 @@ final class PetView: NSView {
             // Keep the menu accessible if an installation loses its resources.
             NSColor.windowBackgroundColor.withAlphaComponent(0.9).setFill()
             NSBezierPath(roundedRect: spriteRect, xRadius: 12, yRadius: 12).fill()
-            drawCentered("缺少 sprite.png", font: .systemFont(ofSize: bounds.width * 0.08),
+            drawCentered("缺少 sprite.png", font: .systemFont(ofSize: side * 0.08),
                          color: .labelColor, center: CGPoint(x: spriteRect.midX, y: spriteRect.midY))
         }
         ctx.restoreGState()
@@ -150,20 +146,11 @@ final class PetView: NSView {
     }
 
     private func drawTabletText(_ ctx: CGContext) {
-        // The original dsh_pet.ps1 measures this screen in the 1024px sprite:
-        // TL (550.3,706.3), TR (946.6,643.8), BL (584.6,924.0).
-        // Convert top-origin source coordinates into AppKit's bottom-origin
-        // coordinates, then apply the same affine mapping to all panel text.
-        let panelWidth: CGFloat = 400
-        let panelHeight: CGFloat = 220
-        let scale = spriteRect.width / 1024
+        let panelWidth = PetLayout.tabletBounds.width
+        let panelHeight = PetLayout.tabletBounds.height
         ctx.saveGState()
-        ctx.translateBy(x: spriteRect.minX, y: spriteRect.minY)
-        ctx.scaleBy(x: scale, y: scale)
-        ctx.concatenate(CGAffineTransform(a: 396.3 / panelWidth, b: 62.5 / panelWidth,
-                                          c: -34.3 / panelHeight, d: 217.7 / panelHeight,
-                                          tx: 584.6, ty: 1024 - 924.0))
-        ctx.clip(to: CGRect(x: 0, y: 0, width: panelWidth, height: panelHeight))
+        ctx.concatenate(PetLayout.tabletTransform(in: bounds))
+        ctx.clip(to: PetLayout.tabletBounds)
         ctx.setShadow(offset: CGSize(width: 1.5, height: -1.5), blur: 1.5,
                       color: NSColor.black.withAlphaComponent(0.65).cgColor)
 
@@ -202,7 +189,6 @@ final class PetView: NSView {
     }
 
     private func drawFloating(_ ctx: CGContext) {
-        let side = bounds.width
         let start = side
         let top = bounds.height - side * 0.10
         let font = NSFont.monospacedDigitSystemFont(ofSize: side * 0.080, weight: .heavy)
@@ -213,7 +199,9 @@ final class PetView: NSView {
                 .font: font, .foregroundColor: label.color.withAlphaComponent(alpha),
             ])
             let size = value.size()
-            let x = min(max(0, side * label.x - size.width / 2), max(0, side - size.width))
+            // Follow the character on the right, rather than centering over the tail.
+            let x = min(max(0, bounds.width - side + side * label.x - size.width / 2),
+                        max(0, bounds.width - size.width))
             ctx.saveGState()
             ctx.setShadow(offset: .zero, blur: side * 0.022,
                           color: NSColor.black.withAlphaComponent(0.4 * alpha).cgColor)

@@ -1,6 +1,6 @@
 # DSH大肥鱼桌宠
 
-用于 DeepSeek Harness 的 macOS 原生余额桌宠，基于 [VKmich16/V](https://github.com/VKmich16/V) 的 Windows 原版移植。默认使用原版蓝色大肥鱼图片和打击音效。
+用于 DeepSeek Harness 的 macOS 原生余额桌宠，基于 [VKmich16/V](https://github.com/VKmich16/V) 的 Windows 原版移植。1.2.0 使用补全左侧头发与鲸尾的新版蓝色大肥鱼图片，余额显示在手持平板内，保留原版打击音效。
 
 ![蓝色大肥鱼桌宠](dsh-balance-pet-macos/docs/screenshots/01-connected.png)
 

@@ -89,23 +89,7 @@ enum Diagnostics {
         failures += NetworkSelfTests.run()
 
         print("\n== bundled artwork, audio, and hit testing ==")
-        expect(PetAssets.sprite?.image.width == 1024, "original 1024px sprite loads")
-        expect(PetAssets.sprite?.isOpaque(at: CGPoint(x: 0.5, y: 0.5)) == true,
-               "original sprite body is interactive")
-        expect(PetAssets.sprite?.isOpaque(at: CGPoint(x: 0.05, y: 0.95)) == false,
-               "original sprite transparent pixels remain click-through")
-        let side: CGFloat = 150
-        let win = NSWindow(contentRect: NSRect(x: 0, y: 0, width: side, height: side * (1 + PetView.floatBand)),
-                           styleMask: [.borderless], backing: .buffered, defer: false)
-        let pv = PetView(model: PetModel())
-        win.contentView = pv
-        expect(pv.containsInteractivePoint(NSPoint(x: 75, y: 75)), "the body accepts clicks")
-        expect(!pv.containsInteractivePoint(NSPoint(x: 75, y: 215)), "floating numbers do not intercept clicks")
-        expect(!pv.containsInteractivePoint(NSPoint(x: 1, y: 1)), "the outside margin is click-through")
-        expect(!pv.containsInteractivePoint(NSPoint(x: 15, y: 135)), "transparent pixels inside the sprite square are click-through")
-        if let url = PetPaths.soundURL, let sound = NSSound(contentsOf: url, byReference: false) {
-            expect(url.lastPathComponent == "hit.mp3" && sound.duration > 0, "original MP3 loads and decodes")
-        } else { expect(false, "original MP3 loads and decodes") }
+        ArtworkSelfTests.run(expect)
 
         print(failures == 0 ? "\nALL PASS" : "\n\(failures) FAILURE(S)")
         return failures == 0 ? 0 : 1
@@ -174,7 +158,7 @@ enum Diagnostics {
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
 
         let side: CGFloat = 240
-        let frame = NSRect(x: 0, y: 0, width: side, height: side * (1 + PetView.floatBand))
+        let frame = NSRect(origin: .zero, size: PetLayout.windowSize(side: side))
 
         func makeView(_ model: PetModel) -> PetView {
             let v = PetView(model: model)
@@ -221,7 +205,7 @@ enum Diagnostics {
         if render(v1, to: dir.appendingPathComponent(transparent), transparent: true) { written.append(transparent) }
         for preset in PetController.sizePresets {
             let sized = PetView(model: idle)
-            sized.frame = NSRect(x: 0, y: 0, width: preset.side, height: preset.side * (1 + PetView.floatBand))
+            sized.frame = NSRect(origin: .zero, size: PetLayout.windowSize(side: preset.side))
             let name = "size-\(Int(preset.side))pt.png"
             if render(sized, to: dir.appendingPathComponent(name)) { written.append(name) }
         }
@@ -229,6 +213,12 @@ enum Diagnostics {
             let model = PetModel()
             model.apply(reading: reading(amount), snap: true)
             if render(makeView(model), to: dir.appendingPathComponent(name)) { written.append(name) }
+            for preset in PetController.sizePresets {
+                let sized = PetView(model: model)
+                sized.frame = NSRect(origin: .zero, size: PetLayout.windowSize(side: preset.side))
+                let sizeName = "size-\(Int(preset.side))pt-\(name)"
+                if render(sized, to: dir.appendingPathComponent(sizeName)) { written.append(sizeName) }
+            }
         }
         let stale = PetModel()
         stale.apply(reading: reading(38.61), snap: true)
@@ -236,9 +226,14 @@ enum Diagnostics {
         let staleName = "08-disconnected.png"
         if render(makeView(stale), to: dir.appendingPathComponent(staleName)) { written.append(staleName) }
 
+        let detail = makeView(idle)
+        detail.frame = NSRect(origin: .zero, size: PetLayout.windowSize(side: 640))
+        let detailName = "09-tablet-detail.png"
+        if render(detail, to: dir.appendingPathComponent(detailName)) { written.append(detailName) }
+
         print("wrote \(written.count) snapshot(s) to \(dir.path)")
         for w in written { print("  " + w) }
-        return written.count == 12 ? 0 : 1
+        return written.count == 21 ? 0 : 1
     }
 
     // MARK: - Live status

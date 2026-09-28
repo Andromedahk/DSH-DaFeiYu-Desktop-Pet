@@ -49,7 +49,7 @@ final class PetController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         view = PetView(model: model)
         view.controller = self
 
-        let content = NSRect(x: 0, y: 0, width: side, height: side * (1 + PetView.floatBand))
+        let content = NSRect(origin: .zero, size: PetLayout.windowSize(side: side))
         window = PetWindow(contentRect: content,
                            styleMask: [.borderless],
                            backing: .buffered,
@@ -470,7 +470,7 @@ final class PetController: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func setSize(index: Int) {
         state.sizeIndex = min(max(index, 0), Self.sizePresets.count - 1)
-        let newSize = NSSize(width: side, height: side * (1 + PetView.floatBand))
+        let newSize = PetLayout.windowSize(side: side)
         let origin = window.frame.origin
         window.setFrame(NSRect(origin: origin, size: newSize), display: true)
         keepWindowVisible()

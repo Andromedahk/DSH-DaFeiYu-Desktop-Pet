@@ -40,7 +40,7 @@ else
   compile "$ARCH" "$APP/Contents/MacOS/$NAME"
 fi
 
-echo "==> copying original blue pet and sound"
+echo "==> copying tail-completed pet and original sound"
 cp "$ROOT/Resources/sprite.png" "$APP/Contents/Resources/sprite.png"
 cp "$ROOT/Resources/hit.mp3" "$APP/Contents/Resources/hit.mp3"
 cp "$ROOT/Info.plist" "$APP/Contents/Info.plist"
