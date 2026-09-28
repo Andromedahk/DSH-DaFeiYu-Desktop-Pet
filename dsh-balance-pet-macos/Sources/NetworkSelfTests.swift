@@ -85,6 +85,63 @@ enum NetworkSelfTests {
         expect(CredentialStore.yamlAPIKey(from: yaml) == "fixture-api-key", "YAML API key skips comments and handles quotes")
         let grant = CredentialStore.accountGrant(from: yaml)
         expect(grant?.token == "fixture-account-token" && grant?.issuer == "https://example.invalid/platform/", "YAML grant handles comments without accepting nested token")
+        // Match DSH's persisted kind/payload wrapper without assuming the kind
+        // enum or reading a real credential. Token and issuer are siblings.
+        let payloadYAML = """
+        credentials:
+          deepseek-account-platform/default:
+            kind: fixture-account-kind
+            payload:
+              version: 1
+              token: "fixture-payload-token"
+              issuer: 'https://example.invalid'
+              metadata:
+                token: ignored-nested-token
+                issuer: https://nested.invalid
+            metadata:
+              token: ignored-record-token
+              issuer: https://record.invalid
+        """
+        let payloadGrant = CredentialStore.accountGrant(from: payloadYAML)
+        expect(payloadGrant?.token == "fixture-payload-token" && payloadGrant?.issuer == "https://example.invalid",
+               "DSH kind/payload credential is read from exact sibling fields")
+        let legacyYAML = """
+        deepseek-account-platform/default:
+          token: fixture-legacy-token
+          issuer: https://example.invalid
+          metadata:
+            token: ignored-legacy-metadata-token
+            issuer: https://metadata.invalid
+        """
+        let legacyGrant = CredentialStore.accountGrant(from: legacyYAML)
+        expect(legacyGrant?.token == "fixture-legacy-token" && legacyGrant?.issuer == "https://example.invalid",
+               "legacy direct account credential remains supported")
+        func rejectsGrantBody(_ body: String) -> Bool {
+            let yaml = "deepseek-account-platform/default:\n" + body
+            return CredentialStore.accountGrant(from: yaml) == nil
+        }
+        expect(rejectsGrantBody("  payload:\n    token: one\n    metadata:\n      issuer: https://example.invalid"),
+               "payload token cannot pair with nested metadata issuer")
+        expect(rejectsGrantBody("  first:\n    token: one\n  second:\n    issuer: https://example.invalid"),
+               "unrelated sibling containers cannot form a grant")
+        expect(rejectsGrantBody("  token: legacy\n  payload:\n    issuer: https://example.invalid"),
+               "legacy token cannot pair with payload issuer")
+        expect(rejectsGrantBody("  issuer: https://example.invalid\n  payload:\n    token: wrapped"),
+               "payload token cannot pair with legacy issuer")
+        expect(rejectsGrantBody("  token: legacy\n  issuer: https://legacy.invalid\n  payload:\n    token: wrapped\n    issuer: https://wrapped.invalid"),
+               "ambiguous complete legacy and payload records are rejected")
+        expect(rejectsGrantBody("  payload:\n    token: one\n    issuer: https://example.invalid\n  payload:\n    token: two\n    issuer: https://other.invalid"),
+               "duplicate payload containers are rejected")
+        expect(rejectsGrantBody("  payload:\n    token: one\n    token: two\n    issuer: https://example.invalid"),
+               "duplicate payload token is rejected")
+        expect(rejectsGrantBody("  payload:\n    token: one\n    issuer: https://example.invalid\n    issuer: https://other.invalid"),
+               "duplicate payload issuer is rejected")
+        expect(rejectsGrantBody("  token: one\n  issuer: https://example.invalid\n  issuer: https://other.invalid"),
+               "duplicate legacy issuer is rejected")
+        for value in ["plain-scalar", "'quoted-scalar'", "null", "[]", "true"] {
+            expect(rejectsGrantBody("  kind: fixture-account-kind\n  payload: " + value),
+                   "scalar or unsupported payload cannot authenticate: " + value)
+        }
         expect(CredentialStore.yamlAPIKey(from: "# DEEPSEEK_API_KEY: ignored-key") == nil, "commented-out credential cannot authenticate")
         expect(CredentialStore.yamlAPIKey(from: "DEEPSEEK_API_KEY: first-key\nDEEPSEEK_API_KEY: second-key") == nil, "duplicate YAML key is rejected")
         expect(CredentialStore.accountGrant(from: "deepseek-account-platform/default:\n  token: one\n  token: two\n  issuer: https://example.invalid") == nil,

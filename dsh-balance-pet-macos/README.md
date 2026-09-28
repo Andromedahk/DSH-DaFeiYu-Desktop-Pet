@@ -57,7 +57,7 @@ open 'dist/DSH大肥鱼桌宠.app'
 
 账号请求只使用本地凭证记录的 HTTPS issuer，拒绝含用户名、查询参数等不安全格式的地址，并拒绝所有 HTTP 重定向。应用不把凭证写入日志。默认每 30 秒请求一次，可改为 10 / 30 / 60 / 300 秒；间隔从上次请求完成后计算。429 优先遵守 `Retry-After`（秒数或 HTTP 日期，最多 24 小时），未提供时逐次退避，最多 5 分钟。
 
-YAML 读取器支持 DSH 常用的块式映射、引号与注释，不是通用 YAML 解析器；不支持锚点、别名或多行凭证。
+YAML 读取器支持 DSH 常用的块式映射、引号与注释。账号验证登录会自动读取 `deepseek-account-platform/default.payload` 内的 `token` 与 `issuer`，同时兼容旧版直接字段格式；无需另建 API Key。它不是通用 YAML 解析器，不支持锚点、别名或多行凭证。
 
 ## 本地文件
 
@@ -87,7 +87,7 @@ BIN='./dist/DSH大肥鱼桌宠.app/Contents/MacOS/DSHBalancePet'
 "$BIN" --check          # 可选：读取真实凭证并实际查询一次余额
 ```
 
-`verify.sh` 使用隔离的临时配置和离线模式；覆盖回归测试、素材一致性、签名、启动、重复实例与位置重置。输出在 `build/verification`。GitHub Actions 在推送时构建 universal 包、执行同一验证并保存下载产物。本机已通过 Apple Silicon 原生及 Rosetta 的 Intel 指令集测试；实际账号接口及 Intel 实机运行仍需对应环境验证。
+`verify.sh` 使用隔离的临时配置和离线模式；覆盖回归测试、素材一致性、签名、启动、重复实例与位置重置。输出在 `build/verification`。GitHub Actions 在推送时构建 universal 包、执行同一验证并保存下载产物。本机已通过 Apple Silicon 原生及 Rosetta 的 Intel 指令集测试；1.1.1 已通过本机 DSH 账号验证登录的实际余额查询；Intel 实机运行及其他账号环境仍需对应验证。
 
 ## 源码与来源
 

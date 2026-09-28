@@ -202,27 +202,52 @@ enum CredentialStore {
         return value
     }
 
-    /// Deliberately limited block-YAML reader for DSH's credential file. It
-    /// handles comments/quoted scalars and only direct children of the grant.
+    /// Read DSH's account record: kind + payload { version, token, issuer }.
+    /// Older records store token/issuer directly. Only siblings within one
+    /// recognized container may form a grant; unrelated descendants are ignored.
     static func accountGrant(from yaml: String) -> (token: String, issuer: String)? {
         let lines = yaml.components(separatedBy: .newlines)
         let grants = lines.enumerated().filter { mappingLine($0.element)?.key == "deepseek-account-platform/default" }
         guard grants.count == 1, let grant = grants.first,
               let header = mappingLine(grant.element), header.value.isEmpty else { return nil }
-        var fields: [String: String] = [:]
-        var childIndent: Int?
-        for line in lines.dropFirst(grant.offset + 1) {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            if trimmed.isEmpty || trimmed.hasPrefix("#") { continue }
-            let indent = line.prefix { $0 == " " }.count
-            if indent <= header.indent { break }
-            guard let item = mappingLine(line) else { continue }
-            if childIndent == nil { childIndent = item.indent }
-            guard item.indent == childIndent, ["token", "issuer"].contains(item.key) else { continue }
-            guard fields[item.key] == nil, let value = scalar(item.value) else { return nil }
-            fields[item.key] = value
+
+        func children(after offset: Int, parentIndent: Int) -> [(offset: Int, item: MappingLine)]? {
+            var result: [(offset: Int, item: MappingLine)] = []
+            var childIndent: Int?
+            for index in (offset + 1)..<lines.count {
+                let line = lines[index]
+                let trimmed = line.trimmingCharacters(in: .whitespaces)
+                if trimmed.isEmpty || trimmed.hasPrefix("#") { continue }
+                let indent = line.prefix { $0 == " " }.count
+                if indent <= parentIndent { break }
+                if childIndent == nil { childIndent = indent }
+                guard indent == childIndent else { continue }
+                guard let item = mappingLine(line) else { return nil }
+                result.append((index, item))
+            }
+            return result
         }
-        guard let token = fields["token"], isValidToken(token), let issuer = fields["issuer"], !issuer.isEmpty else { return nil }
+
+        guard let direct = children(after: grant.offset, parentIndent: header.indent) else { return nil }
+        let payloads = direct.filter { $0.item.key == "payload" }
+        let legacyFields = direct.filter { ["token", "issuer"].contains($0.item.key) }
+        let fields: [(offset: Int, item: MappingLine)]
+        if let payload = payloads.first {
+            // Multiple payloads, scalar payloads, or a mixture of old/new
+            // layouts are ambiguous and must not select an unintended account.
+            guard payloads.count == 1, payload.item.value.isEmpty, legacyFields.isEmpty,
+                  let nested = children(after: payload.offset, parentIndent: payload.item.indent) else { return nil }
+            fields = nested
+        } else {
+            fields = legacyFields
+        }
+        var values: [String: String] = [:]
+        for field in fields where ["token", "issuer"].contains(field.item.key) {
+            guard values[field.item.key] == nil, let value = scalar(field.item.value) else { return nil }
+            values[field.item.key] = value
+        }
+        guard let token = values["token"], isValidToken(token),
+              let issuer = values["issuer"], !issuer.isEmpty else { return nil }
         return (token, issuer)
     }
 
