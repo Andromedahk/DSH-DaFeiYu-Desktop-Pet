@@ -1,8 +1,10 @@
 # DSH大肥鱼桌宠
 
-用于 DeepSeek Harness 的 macOS 原生余额桌宠，基于 [VKmich16/V](https://github.com/VKmich16/V) 的 Windows 原版移植。1.2.0 使用补全左侧头发与鲸尾的新版蓝色大肥鱼图片，余额显示在手持平板内，保留原版打击音效。
+用于 DeepSeek Harness 的 macOS 原生余额桌宠，基于 [VKmich16/V](https://github.com/VKmich16/V) 的 Windows 原版移植。1.3.0 支持在蓝色大肥鱼、GPT龙娘、大小姐Claude、北美猫娘Gemini之间切换，余额显示在各自手持的平板内，保留原版打击音效。
 
 ![蓝色大肥鱼桌宠](dsh-balance-pet-macos/docs/screenshots/01-connected.png)
+
+右键桌宠或点击菜单栏 ¥ → **切换角色**；选中后立即显示，重启后保留选择。
 
 - [macOS 版源码与使用说明](dsh-balance-pet-macos/README.md)
 - [代码审查与验证记录](dsh-balance-pet-macos/docs/REVIEW.md)

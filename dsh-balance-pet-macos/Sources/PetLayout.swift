@@ -1,6 +1,6 @@
 import AppKit
 
-/// Coordinates for the tail-completed 1536 × 1024 artwork. A size preset still
+/// Coordinates for the four 1536 × 1024 character images. A size preset still
 /// means body height, so adding the tail does not shrink the face or balance.
 enum PetLayout {
     static let artworkSize = CGSize(width: 1536, height: 1024)
@@ -23,18 +23,17 @@ enum PetLayout {
                       width: size.width, height: size.height)
     }
 
-    static func tabletTransform(in bounds: CGRect) -> CGAffineTransform {
-        // Safe text region, measured from the new PNG's upper-left:
-        // TL (1060,699), TR (1413,644), BL (1090,889), BR (1443,834).
-        // This inset avoids the bezel and both hands. Convert to bottom-origin
-        // source coordinates, then use the exact same scale as the sprite.
+    static func tabletTransform(in bounds: CGRect, character: PetCharacter = .deepseek) -> CGAffineTransform {
+        // Convert the selected image's measured corners to bottom-origin source
+        // coordinates, using the exact same scale as its sprite and alpha mask.
+        let corners = character.tabletCorners
         let rect = spriteRect(in: bounds)
         let scale = rect.width / artworkSize.width
-        return CGAffineTransform(a: 353 / tabletBounds.width * scale,
-                                 b: 55 / tabletBounds.width * scale,
-                                 c: -30 / tabletBounds.height * scale,
-                                 d: 190 / tabletBounds.height * scale,
-                                 tx: rect.minX + 1090 * scale,
-                                 ty: rect.minY + (artworkSize.height - 889) * scale)
+        return CGAffineTransform(a: (corners.topRight.x - corners.topLeft.x) / tabletBounds.width * scale,
+                                 b: (corners.topLeft.y - corners.topRight.y) / tabletBounds.width * scale,
+                                 c: (corners.topLeft.x - corners.bottomLeft.x) / tabletBounds.height * scale,
+                                 d: (corners.bottomLeft.y - corners.topLeft.y) / tabletBounds.height * scale,
+                                 tx: rect.minX + corners.bottomLeft.x * scale,
+                                 ty: rect.minY + (artworkSize.height - corners.bottomLeft.y) * scale)
     }
 }

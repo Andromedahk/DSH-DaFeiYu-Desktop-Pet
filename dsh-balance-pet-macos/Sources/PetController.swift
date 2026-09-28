@@ -46,7 +46,10 @@ final class PetController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         credential = CredentialStore.resolve()
         schedule = PollSchedule(interval: state.pollSeconds)
 
-        view = PetView(model: model)
+        if PetAssets.sprite(for: state.character) == nil {
+            state.character = .deepseek
+        }
+        view = PetView(model: model, character: state.character)
         view.controller = self
 
         let content = NSRect(origin: .zero, size: PetLayout.windowSize(side: side))
@@ -200,6 +203,8 @@ final class PetController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let obj: [String: Any] = [
             "running": running,
             "pid": Int(ProcessInfo.processInfo.processIdentifier),
+            "character": view.character.rawValue,
+            "characterName": view.character.displayName,
             "connected": model.connected,
             "display": model.displayString,
             "real": model.realString,
@@ -349,6 +354,20 @@ final class PetController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(demo)
         menu.setSubmenu(demoMenu, for: demo)
 
+        let characterMenu = NSMenu(title: "切换角色")
+        characterMenu.autoenablesItems = false
+        characterMenu.delegate = self
+        for character in PetCharacter.allCases {
+            let choice = item(character.displayName, PetAssets.sprite(for: character) != nil) { [weak self] in
+                self?.setCharacter(character)
+            }
+            choice.state = (character == state.character) ? .on : .off
+            characterMenu.addItem(choice)
+        }
+        let characterItem = NSMenuItem(title: characterMenu.title, action: nil, keyEquivalent: "")
+        menu.addItem(characterItem)
+        menu.setSubmenu(characterMenu, for: characterItem)
+
         let sizeMenu = NSMenu(title: "尺寸")
         sizeMenu.autoenablesItems = false
         sizeMenu.delegate = self
@@ -467,6 +486,16 @@ final class PetController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     // MARK: - Actions
+
+    private func setCharacter(_ character: PetCharacter) {
+        guard character != state.character, PetAssets.sprite(for: character) != nil else { return }
+        state.character = character
+        view.setCharacter(character)
+        // Switching artwork leaves the balance model, queued animations, polling,
+        // position and size intact. The next pointer tick uses the new alpha mask.
+        state.save()
+        writeStatus()
+    }
 
     private func setSize(index: Int) {
         state.sizeIndex = min(max(index, 0), Self.sizePresets.count - 1)

@@ -325,6 +325,7 @@ enum CredentialStore {
 // MARK: - Persisted state
 
 struct PetState {
+    var character: PetCharacter = .deepseek
     var sizeIndex: Int = 1          // index into PetController.sizePresets
     var snapOnRelease: Bool = true
     var soundOn: Bool = true
@@ -335,6 +336,9 @@ struct PetState {
         var s = PetState()
         guard let data = try? Data(contentsOf: url),
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return s }
+        if let value = obj["character"] as? String, let character = PetCharacter(rawValue: value) {
+            s.character = character
+        }
         if let v = obj["sizeIndex"] as? Int, (0...3).contains(v) { s.sizeIndex = v }
         if let v = obj["snapOnRelease"] as? Bool { s.snapOnRelease = v }
         if let v = obj["soundOn"] as? Bool { s.soundOn = v }
@@ -347,6 +351,7 @@ struct PetState {
 
     func save(to url: URL = PetPaths.stateURL) {
         var obj: [String: Any] = [
+            "character": character.rawValue,
             "sizeIndex": min(3, max(0, sizeIndex)),
             "snapOnRelease": snapOnRelease,
             "soundOn": soundOn,

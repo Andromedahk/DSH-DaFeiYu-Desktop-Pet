@@ -1,6 +1,6 @@
 # DSH大肥鱼桌宠 · macOS
 
-用于 DeepSeek Harness 的原生余额桌宠，基于 [VKmich16/V](https://github.com/VKmich16/V) 移植。1.2.0 默认使用补全左侧头发与鲸尾的**蓝色大肥鱼**图片及原版 `hit.mp3` 音效；余额按新图重新定位在角色手持的倾斜平板内。
+用于 DeepSeek Harness 的原生余额桌宠，基于 [VKmich16/V](https://github.com/VKmich16/V) 移植。1.3.0 支持四个内置角色：**蓝色大肥鱼、GPT龙娘、大小姐Claude、北美猫娘Gemini**，保留原版 `hit.mp3` 音效；余额在每个角色手持的倾斜平板内显示。
 
 它是独立的 Swift + AppKit 应用，可读取 DSH 凭证；无需修改或持续运行 DSH。目前维护和支持 macOS 13+。
 
@@ -26,6 +26,7 @@ open 'dist/DSH大肥鱼桌宠.app'
 | 左键拖动 | 移动；默认松手吸附当前屏幕左下角，可关闭 |
 | 右键 / Control + 单击 | 打开菜单 |
 | 菜单栏 ¥ | 查看余额、凭证来源及操作菜单 |
+| 切换角色 | 右键或菜单栏选择四个角色，立即生效并记住选择 |
 | 透明区域 / 飘字区域 | 鼠标穿透 |
 | 立即刷新余额 | 对齐真实余额，跳过排队动画；请求中或限流等待期不可重复刷新 |
 | 测试一次扣费 / 演示连续扣费 | 仅演示，不修改真实余额，不发起扣费 |
@@ -37,6 +38,16 @@ open 'dist/DSH大肥鱼桌宠.app'
 每下降一分钱，红闪、震动、播放音效并飘出 `-0.01`；间隔 0.2 秒。超过 400 分的变化直接对齐，避免长时间播放积压动画。充值立即显示，并根据连续两次服务器余额计算到账金额。演示余额与真实余额分开处理。
 
 新版图片保持 1536×1024 的原始宽高比，同一尺寸档下角色高度与旧版一致；鲸尾向左扩展。余额、币种符号与连接状态点一起跟随平板倾斜和震动，长金额自动缩小以保留完整数字。图片空白处与上方飘字区域继续支持鼠标穿透。
+
+切换角色保留当前余额、扣费动画、刷新间隔、窗口位置和尺寸。每个角色使用自己的透明点击区域和平板坐标；旧配置首次升级继续显示蓝色大肥鱼。
+
+| 角色 | 外观 |
+| --- | --- |
+| GPT龙娘 | 白发、龙角与鳞片龙尾 |
+| 大小姐Claude | 橙发、花饰与象牙白服装 |
+| 北美猫娘Gemini | 蓝紫发、异色瞳与毛绒尾巴 |
+
+![三种新增角色与示例余额](docs/screenshots/character-selection.png)
 
 ## 凭证与余额
 
@@ -68,7 +79,7 @@ YAML 读取器支持 DSH 常用的块式映射、引号与注释。账号验证�
 | 文件 | 内容 |
 | --- | --- |
 | `apikey.txt` | 手动保存的 API Key |
-| `state.json` | 尺寸、音效、刷新间隔及窗口位置 |
+| `state.json` | 所选角色、尺寸、音效、刷新间隔及窗口位置 |
 | `status.json` | 最近运行状态、余额与窗口信息，每秒原子更新 |
 | `pet.log` / `pet.log.1` | 本地诊断日志，单份约 1 MiB 后轮换；可能包含余额 |
 | `pet.lock` | 防止同一配置目录重复启动；退出/崩溃后系统释放锁 |
@@ -82,7 +93,7 @@ YAML 读取器支持 DSH 常用的块式映射、引号与注释。账号验证�
 
 BIN='./dist/DSH大肥鱼桌宠.app/Contents/MacOS/DSHBalancePet'
 "$BIN" --selftest       # 离线回归、资源解码、平板定位与透明命中检查
-"$BIN" --snapshot DIR   # 21 张状态、尺寸、透明及平板近景预览，使用示例余额
+"$BIN" --snapshot DIR   # 四角色共 84 张状态、尺寸、透明及平板近景预览，使用示例余额
 "$BIN" --windows        # 当前配置目录的最近状态；停止/过期返回非零
 "$BIN" --screens        # 显示器布局
 "$BIN" --reset          # 退出桌宠后，仅清除保存的位置，保留其他偏好
@@ -97,9 +108,10 @@ BIN='./dist/DSH大肥鱼桌宠.app/Contents/MacOS/DSHBalancePet'
 - `BalanceClient.swift`：请求、严格响应解析与精确金额。
 - `PetModel.swift`：余额和动画；`PollSchedule.swift`：请求调度。
 - `PetController.swift`：窗口、菜单、轮询与音效。
-- `PetView.swift` / `PetAssets.swift` / `PetLayout.swift`：鲸尾新版图片、平板坐标、等比缩放和透明区域交互。
+- `PetCharacter.swift`：四个内置角色的名称、图片与各自平板坐标。
+- `PetView.swift` / `PetAssets.swift` / `PetLayout.swift`：角色切换绘制、等比缩放和透明区域交互。
 - `Diagnostics.swift` / `*SelfTests.swift`：离线回归与诊断。
-- `Resources/`：带尾巴的新版 `sprite.png`，以及从 Windows 原版逐字节复制的 `hit.mp3`。
+- `Resources/`：四张角色 PNG，以及从 Windows 原版逐字节复制的 `hit.mp3`。
 - `artwork/left-completion-v1/`：补全图片、参考、提示词与原始素材检查记录。
 
 上游原始代码及素材完整保存在仓库的 `原版（Windows版）`，来源见 [素材说明](Resources/README.md)。旧音效生成脚本保留供参考，默认构建不再使用。

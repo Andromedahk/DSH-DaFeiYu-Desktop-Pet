@@ -1,28 +1,36 @@
 import AppKit
 
-/// Tail-completed 大肥鱼 artwork, with the readout mapped onto its tilted tablet.
+/// Selected character artwork, with the readout mapped onto its tilted tablet.
 /// The upper band is reserved for floating amounts and always passes clicks through.
 final class PetView: NSView {
     weak var controller: PetController?
     let model: PetModel
+    private(set) var character: PetCharacter
 
     private var dragStartMouse: NSPoint = .zero
     private var dragStartOrigin: NSPoint = .zero
     private var didDrag = false
     private(set) var isDragging = false
 
-    init(model: PetModel) {
+    init(model: PetModel, character: PetCharacter = .deepseek) {
         self.model = model
+        self.character = character
         super.init(frame: NSRect(origin: .zero, size: PetLayout.windowSize(side: 150)))
         setAccessibilityElement(true)
         setAccessibilityRole(.image)
-        setAccessibilityLabel("DSH 大肥鱼余额桌宠")
+        setAccessibilityLabel("DSH 余额桌宠 · \(character.displayName)")
         setAccessibilityHelp("拖动以移动，右键打开菜单。余额也可在菜单栏查看。")
     }
 
     required init?(coder: NSCoder) { fatalError("not used") }
     override var isFlipped: Bool { false }
     override var isOpaque: Bool { false }
+
+    func setCharacter(_ character: PetCharacter) {
+        self.character = character
+        setAccessibilityLabel("DSH 余额桌宠 · \(character.displayName)")
+        needsDisplay = true
+    }
 
     // MARK: - Geometry and interaction
 
@@ -49,7 +57,7 @@ final class PetView: NSView {
         let local = CGPoint(x: point.x - offset.x, y: point.y - offset.y)
         let rect = spriteRect
         guard rect.contains(local) else { return false }
-        guard let sprite = PetAssets.sprite else { return true }
+        guard let sprite = PetAssets.sprite(for: character) else { return true }
         return sprite.isOpaque(at: CGPoint(x: (local.x - rect.minX) / rect.width,
                                            y: (local.y - rect.minY) / rect.height))
     }
@@ -112,7 +120,7 @@ final class PetView: NSView {
             ctx.strokeEllipse(in: rect)
         }
 
-        if let sprite = PetAssets.sprite {
+        if let sprite = PetAssets.sprite(for: character) {
             ctx.interpolationQuality = .high
             ctx.beginTransparencyLayer(auxiliaryInfo: nil)
             ctx.draw(sprite.image, in: spriteRect)
@@ -132,7 +140,7 @@ final class PetView: NSView {
             // Keep the menu accessible if an installation loses its resources.
             NSColor.windowBackgroundColor.withAlphaComponent(0.9).setFill()
             NSBezierPath(roundedRect: spriteRect, xRadius: 12, yRadius: 12).fill()
-            drawCentered("缺少 sprite.png", font: .systemFont(ofSize: side * 0.08),
+            drawCentered("缺少角色图片", font: .systemFont(ofSize: side * 0.08),
                          color: .labelColor, center: CGPoint(x: spriteRect.midX, y: spriteRect.midY))
         }
         ctx.restoreGState()
@@ -149,7 +157,7 @@ final class PetView: NSView {
         let panelWidth = PetLayout.tabletBounds.width
         let panelHeight = PetLayout.tabletBounds.height
         ctx.saveGState()
-        ctx.concatenate(PetLayout.tabletTransform(in: bounds))
+        ctx.concatenate(PetLayout.tabletTransform(in: bounds, character: character))
         ctx.clip(to: PetLayout.tabletBounds)
         ctx.setShadow(offset: CGSize(width: 1.5, height: -1.5), blur: 1.5,
                       color: NSColor.black.withAlphaComponent(0.65).cgColor)

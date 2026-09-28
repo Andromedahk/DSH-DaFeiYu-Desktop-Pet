@@ -1,6 +1,6 @@
 import AppKit
 
-/// The tail-completed artwork and original Windows sound are bundled unchanged.
+/// Built-in characters and the original Windows sound are bundled unchanged.
 enum PetAssets {
     /// Bundle lookup is independent of the current working directory. The source
     /// fallback also supports running a freshly compiled development executable.
@@ -41,11 +41,18 @@ enum PetAssets {
         }
     }
 
-    static let sprite: Sprite? = {
-        guard let url = resourceURL(named: "sprite.png"), let sprite = Sprite(url: url) else {
-            Log.write("sprite.png is missing or unreadable")
-            return nil
+    private static let sprites: [PetCharacter: Sprite] = {
+        var result: [PetCharacter: Sprite] = [:]
+        for character in PetCharacter.allCases {
+            guard let url = resourceURL(named: character.resourceName),
+                  let sprite = Sprite(url: url) else {
+                Log.write("\(character.resourceName) is missing or unreadable")
+                continue
+            }
+            result[character] = sprite
         }
-        return sprite
+        return result
     }()
+
+    static func sprite(for character: PetCharacter) -> Sprite? { sprites[character] }
 }

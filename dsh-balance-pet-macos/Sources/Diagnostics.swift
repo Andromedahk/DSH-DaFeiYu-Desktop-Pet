@@ -155,13 +155,27 @@ enum Diagnostics {
     static func snapshot(into directory: String) -> Int32 {
         _ = NSApplication.shared
         let dir = URL(fileURLWithPath: directory)
+        var written: [String] = []
+        for character in PetCharacter.allCases {
+            // Keep the original 21 filenames stable for README links.
+            let prefix = character == .deepseek ? "" : character.rawValue + "/"
+            let destination = prefix.isEmpty ? dir : dir.appendingPathComponent(character.rawValue)
+            let names = characterSnapshots(into: destination, character: character)
+            written.append(contentsOf: names.map { prefix + $0 })
+        }
+        print("wrote \(written.count) snapshot(s) to \(dir.path)")
+        for name in written { print("  " + name) }
+        return written.count == 21 * PetCharacter.allCases.count ? 0 : 1
+    }
+
+    private static func characterSnapshots(into dir: URL, character: PetCharacter) -> [String] {
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
 
         let side: CGFloat = 240
         let frame = NSRect(origin: .zero, size: PetLayout.windowSize(side: side))
 
         func makeView(_ model: PetModel) -> PetView {
-            let v = PetView(model: model)
+            let v = PetView(model: model, character: character)
             v.frame = frame
             return v
         }
@@ -204,7 +218,7 @@ enum Diagnostics {
         let transparent = "05-transparent.png"
         if render(v1, to: dir.appendingPathComponent(transparent), transparent: true) { written.append(transparent) }
         for preset in PetController.sizePresets {
-            let sized = PetView(model: idle)
+            let sized = PetView(model: idle, character: character)
             sized.frame = NSRect(origin: .zero, size: PetLayout.windowSize(side: preset.side))
             let name = "size-\(Int(preset.side))pt.png"
             if render(sized, to: dir.appendingPathComponent(name)) { written.append(name) }
@@ -214,7 +228,7 @@ enum Diagnostics {
             model.apply(reading: reading(amount), snap: true)
             if render(makeView(model), to: dir.appendingPathComponent(name)) { written.append(name) }
             for preset in PetController.sizePresets {
-                let sized = PetView(model: model)
+                let sized = PetView(model: model, character: character)
                 sized.frame = NSRect(origin: .zero, size: PetLayout.windowSize(side: preset.side))
                 let sizeName = "size-\(Int(preset.side))pt-\(name)"
                 if render(sized, to: dir.appendingPathComponent(sizeName)) { written.append(sizeName) }
@@ -231,9 +245,7 @@ enum Diagnostics {
         let detailName = "09-tablet-detail.png"
         if render(detail, to: dir.appendingPathComponent(detailName)) { written.append(detailName) }
 
-        print("wrote \(written.count) snapshot(s) to \(dir.path)")
-        for w in written { print("  " + w) }
-        return written.count == 21 ? 0 : 1
+        return written
     }
 
     // MARK: - Live status
@@ -255,7 +267,7 @@ enum Diagnostics {
         let age = Date().timeIntervalSince1970 - (obj["updatedAt"] as? Double ?? 0)
         let live = (obj["running"] as? Bool == true) && age >= -5 && age <= 5
         print(String(format: "status age: %.1fs%@", age, live ? "" : "  <-- stopped or stale"))
-        let keys = ["running", "pid", "connected", "display", "real", "statusText",
+        let keys = ["running", "pid", "character", "characterName", "connected", "display", "real", "statusText",
                     "lastError", "credential", "spentCny",
                     "windowX", "windowY", "windowW", "windowH",
                     "windowLevel", "windowVisible", "onActiveSpace", "opaque", "screen"]
