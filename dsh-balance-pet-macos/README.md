@@ -1,6 +1,6 @@
 # DSH大肥鱼桌宠 · macOS
 
-用于 DeepSeek Harness 的原生余额桌宠，基于 [VKmich16/V](https://github.com/VKmich16/V) 移植。1.3.0 支持四个内置角色：**蓝色大肥鱼、GPT龙娘、大小姐Claude、北美猫娘Gemini**，保留原版 `hit.mp3` 音效；余额在每个角色手持的倾斜平板内显示。
+用于 DeepSeek Harness 的原生余额桌宠，基于 [VKmich16/V](https://github.com/VKmich16/V) 移植。1.3.1 支持四个内置角色：**蓝色大肥鱼、GPT龙娘、大小姐Claude、北美猫娘Gemini**，保留原版 `hit.mp3` 音效；余额在每个角色手持的倾斜平板内显示。
 
 它是独立的 Swift + AppKit 应用，可读取 DSH 凭证；无需修改或持续运行 DSH。目前维护和支持 macOS 13+。
 
@@ -48,6 +48,10 @@ open 'dist/DSH大肥鱼桌宠.app'
 | 北美猫娘Gemini | 蓝紫发、异色瞳与毛绒尾巴 |
 
 ![四个角色与示例余额](docs/screenshots/four-characters-usage.png)
+
+蓝色大肥鱼在未配置 API Key / 账号凭证、连接中或连接失败时，改为显示抱盆图，不显示余额标题、金额、状态点或金额飘字；连接成功后自动恢复手持平板和余额显示。其他三个角色保持原有显示方式。
+
+![大肥鱼未连接状态](docs/screenshots/deepseek-offline.png)
 
 ## 凭证与余额
 

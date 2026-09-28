@@ -7,6 +7,12 @@ final class PetView: NSView {
     let model: PetModel
     private(set) var character: PetCharacter
 
+    var showsOfflineArtwork: Bool { character == .deepseek && !model.connected }
+
+    private var activeSprite: PetAssets.Sprite? {
+        showsOfflineArtwork ? PetAssets.deepseekOffline : PetAssets.sprite(for: character)
+    }
+
     private var dragStartMouse: NSPoint = .zero
     private var dragStartOrigin: NSPoint = .zero
     private var didDrag = false
@@ -57,7 +63,7 @@ final class PetView: NSView {
         let local = CGPoint(x: point.x - offset.x, y: point.y - offset.y)
         let rect = spriteRect
         guard rect.contains(local) else { return false }
-        guard let sprite = PetAssets.sprite(for: character) else { return true }
+        guard let sprite = activeSprite else { return true }
         return sprite.isOpaque(at: CGPoint(x: (local.x - rect.minX) / rect.width,
                                            y: (local.y - rect.minY) / rect.height))
     }
@@ -120,7 +126,7 @@ final class PetView: NSView {
             ctx.strokeEllipse(in: rect)
         }
 
-        if let sprite = PetAssets.sprite(for: character) {
+        if let sprite = activeSprite {
             ctx.interpolationQuality = .high
             ctx.beginTransparencyLayer(auxiliaryInfo: nil)
             ctx.draw(sprite.image, in: spriteRect)
@@ -135,7 +141,7 @@ final class PetView: NSView {
                 ctx.restoreGState()
             }
             ctx.endTransparencyLayer()
-            drawTabletText(ctx)
+            if !showsOfflineArtwork { drawTabletText(ctx) }
         } else {
             // Keep the menu accessible if an installation loses its resources.
             NSColor.windowBackgroundColor.withAlphaComponent(0.9).setFill()
@@ -144,7 +150,7 @@ final class PetView: NSView {
                          color: .labelColor, center: CGPoint(x: spriteRect.midX, y: spriteRect.midY))
         }
         ctx.restoreGState()
-        drawFloating(ctx)
+        if !showsOfflineArtwork { drawFloating(ctx) }
     }
 
     private func drawCentered(_ text: String, font: NSFont, color: NSColor, center: CGPoint) {

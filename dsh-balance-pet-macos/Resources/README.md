@@ -12,6 +12,7 @@
 | `sprite-gpt.png` | GPT龙娘：白发、龙角、龙尾 | `41f79346666fbb776ee2baef2a0cf044850a50e30c177b3adf9bb14e84296467` |
 | `sprite-claude.png` | 大小姐Claude：橙发、花饰、无尾巴 | `81f0e787057dd9d5e400e5f43a44a1b55da4adfa7329aa712d986531cbd5d90d` |
 | `sprite-gemini.png` | 北美猫娘Gemini：蓝紫发、异色瞳、毛绒尾巴 | `ad5fbeb07c2212476d4670ec56b8e7202e21f05b42ab0461cf3150a43f91a2ef` |
+| `sprite-deepseek-offline.png` | 用户提供的 1536 × 1024 RGBA 抱盆图；仅用于蓝色大肥鱼未连接状态，原文件直接复制 | `fb4c5cb3001ca43d268d2e3bdf39b9d984e28d592e3b73e46e6fd44ccebb4555` |
 | `hit.mp3` | 原版扣费打击音效 | `43fa877b537d8cbfbd676d76109b9a960551bfeae06c62e2d1a7d64d3994cb29` |
 
 补全图片来源、参考与提示词见 [`artwork/left-completion-v1`](../artwork/left-completion-v1/README.md)。Windows 原始 1024 × 1024 图片 SHA-256 为 `5bc1d8f1f347c430dd662ad8ff3da8d0dff3df9f290712efe36d004b7b103e69`。

@@ -54,5 +54,14 @@ enum PetAssets {
         return result
     }()
 
+    static let deepseekOffline: Sprite? = {
+        guard let url = resourceURL(named: "sprite-deepseek-offline.png"),
+              let sprite = Sprite(url: url) else {
+            Log.write("sprite-deepseek-offline.png is missing or unreadable")
+            return nil
+        }
+        return sprite
+    }()
+
     static func sprite(for character: PetCharacter) -> Sprite? { sprites[character] }
 }

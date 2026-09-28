@@ -2,6 +2,23 @@ import AppKit
 
 // Behavioral regressions exercise the actual bundled artwork, without user settings.
 enum ArtworkSelfTests {
+    private final class ImageOnlyView: NSView {
+        let image: CGImage
+        init(image: CGImage, frame: CGRect) {
+            self.image = image
+            super.init(frame: frame)
+        }
+        required init?(coder: NSCoder) { fatalError("unused") }
+        override func draw(_ dirtyRect: NSRect) {
+            guard let ctx = NSGraphicsContext.current?.cgContext else { return }
+            ctx.clear(bounds)
+            ctx.interpolationQuality = .high
+            ctx.beginTransparencyLayer(auxiliaryInfo: nil)
+            ctx.draw(image, in: PetLayout.spriteRect(in: bounds))
+            ctx.endTransparencyLayer()
+        }
+    }
+
     private struct Fixture {
         let sprite: PetAssets.Sprite
         let bitmap: NSBitmapImageRep
@@ -22,7 +39,7 @@ enum ArtworkSelfTests {
         }
     }
 
-    private static func renderedData(_ view: PetView) -> Data? {
+    private static func renderedData(_ view: NSView) -> Data? {
         guard let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return nil }
         view.cacheDisplay(in: view.bounds, to: bitmap)
         return bitmap.representation(using: .png, properties: [:])
@@ -64,7 +81,9 @@ enum ArtworkSelfTests {
                 guard let fixture = fixtures[character] else { continue }
                 let name = "\(character.displayName), \(Int(side))pt"
                 let window = NSWindow(contentRect: frame, styleMask: [.borderless], backing: .buffered, defer: false)
-                let view = PetView(model: PetModel(), character: character)
+                let connectedModel = PetModel()
+                connectedModel.apply(reading: BalanceReading(normalCny: 38.61, bonusCny: 0, spentCny: nil, raw: ""), snap: true)
+                let view = PetView(model: connectedModel, character: character)
                 window.contentView = view
                 let rect = PetLayout.spriteRect(in: view.bounds)
                 expect(abs(rect.width / rect.height - 1.5) < 0.00001
@@ -156,10 +175,63 @@ enum ArtworkSelfTests {
             }
         }
 
+        offlineArtworkTests(expect)
         stateTests(expect)
         if let url = PetPaths.soundURL, let sound = NSSound(contentsOf: url, byReference: false) {
             expect(url.lastPathComponent == "hit.mp3" && sound.duration > 0, "original MP3 loads and decodes")
         } else { expect(false, "original MP3 loads and decodes") }
+    }
+
+    private static func offlineArtworkTests(_ expect: (Bool, String) -> Void) {
+        guard let sprite = PetAssets.deepseekOffline else {
+            expect(false, "offline bowl artwork loads")
+            return
+        }
+        expect(sprite.image.width == 1536 && sprite.image.height == 1024,
+               "offline artwork preserves supplied dimensions")
+        for preset in PetController.sizePresets {
+            let model = PetModel()
+            let frame = CGRect(origin: .zero, size: PetLayout.windowSize(side: preset.side))
+            let view = PetView(model: model)
+            let window = NSWindow(contentRect: frame, styleMask: [.borderless], backing: .buffered, defer: false)
+            window.contentView = view
+            let initial = renderedData(view)
+            let imageOnly = ImageOnlyView(image: sprite.image, frame: frame)
+            let referenceWindow = NSWindow(contentRect: frame, styleMask: [.borderless], backing: .buffered, defer: false)
+            referenceWindow.contentView = imageOnly
+            expect(initial != nil && initial == renderedData(imageOnly),
+                   "offline rendering contains only supplied artwork, without any text or status dot")
+            model.setNoCredential()
+            expect(initial != nil && view.showsOfflineArtwork && renderedData(view) == initial,
+                   "unconfigured and connecting blue pet show the same bowl artwork")
+            let reading = BalanceReading(normalCny: 38.61, bonusCny: 0, spentCny: nil, raw: "")
+            model.apply(reading: reading, snap: true)
+            let online = renderedData(view)
+            expect(!view.showsOfflineArtwork && online != initial,
+                   "successful connection restores tablet artwork and balance")
+            model.fail(.transport("offline fixture"))
+            expect(view.showsOfflineArtwork && renderedData(view) == initial,
+                   "connection failure hides stale balance and restores clean bowl artwork")
+            let rect = PetLayout.spriteRect(in: frame)
+            // Hit testing must use the bowl silhouette, not the former tablet.
+            var maskMatches = true
+            for y in stride(from: 32, to: 1024, by: 64) {
+                for x in stride(from: 32, to: 1536, by: 64) {
+                    let n = normalized(CGPoint(x: Double(x) + 0.5, y: Double(y) + 0.5))
+                    let point = CGPoint(x: rect.minX + n.x * rect.width, y: rect.minY + n.y * rect.height)
+                    if view.containsInteractivePoint(point) != sprite.isOpaque(at: n) { maskMatches = false }
+                }
+            }
+            expect(maskMatches, "offline hit testing follows the bowl image alpha")
+            for character in [PetCharacter.gpt, .claude, .gemini] {
+                view.setCharacter(character)
+                expect(!view.showsOfflineArtwork && renderedData(view) != initial,
+                       "other characters retain their artwork when offline")
+            }
+            view.setCharacter(.deepseek)
+            model.apply(reading: reading, snap: true)
+            expect(renderedData(view) == online, "reconnection restores identical normal rendering")
+        }
     }
 
     private static func stateTests(_ expect: (Bool, String) -> Void) {
