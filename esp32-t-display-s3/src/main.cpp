@@ -11,7 +11,56 @@
 
 // Standard, non-touch LILYGO T-Display-S3: ST7789, 8-bit parallel, 320x170 landscape.
 static Arduino_DataBus *bus = new Arduino_ESP32PAR8Q(7, 6, 8, 9, 39, 40, 41, 42, 45, 46, 47, 48);
-static Arduino_GFX *gfx = new Arduino_ST7789(bus, 5, 0, true, 170, 320, 35, 0, 35, 0);
+
+// The board's own ST7789 INIT_SEQUENCE_3 sets different VCOM, gate voltage,
+// frame rate and gamma values from Arduino_GFX's generic ST7789 sequence.
+// Primaries look correct with either sequence, but character midtones do not.
+// Values below follow LILYGO's T-Display-S3 TFT_eSPI setup for this panel.
+class LilygoST7789 final : public Arduino_ST7789 {
+ public:
+  using Arduino_ST7789::Arduino_ST7789;
+
+ protected:
+  void tftInit() override {
+    pinMode(5, OUTPUT);
+    digitalWrite(5, HIGH); delay(100);
+    digitalWrite(5, LOW); delay(120);
+    digitalWrite(5, HIGH); delay(120);
+
+    bus->sendCommand(0x11); // SLPOUT
+    delay(120);
+    bus->sendCommand(0x13); // NORON
+    setRegister(0x3A, {0x55}); // RGB565
+    delay(10);
+    setRegister(0xB2, {0x0B, 0x0B, 0x00, 0x33, 0x33});
+    setRegister(0xB7, {0x75});
+    setRegister(0xBB, {0x28});
+    setRegister(0xC0, {0x2C});
+    setRegister(0xC2, {0x01});
+    setRegister(0xC3, {0x1F});
+    setRegister(0xC6, {0x13});
+    setRegister(0xD0, {0xA4, 0xA1});
+    setRegister(0xD6, {0xA1});
+    setRegister(0xE0, {0xF0, 0x05, 0x0A, 0x06, 0x06, 0x03, 0x2B,
+                       0x32, 0x43, 0x36, 0x11, 0x10, 0x2B, 0x32});
+    setRegister(0xE1, {0xF0, 0x08, 0x0C, 0x0B, 0x09, 0x24, 0x2B,
+                       0x22, 0x43, 0x38, 0x15, 0x16, 0x2F, 0x37});
+    bus->sendCommand(0x21); // INVON, as in LILYGO's TFT_INVERSION_ON setup
+    delay(120);
+    bus->sendCommand(0x29); // DISPON
+    delay(120);
+  }
+
+ private:
+  static void setRegister(uint8_t command, std::initializer_list<uint8_t> values) {
+    bus->beginWrite();
+    bus->writeCommand(command);
+    for (uint8_t value : values) bus->write(value);
+    bus->endWrite();
+  }
+};
+
+static Arduino_GFX *gfx = new LilygoST7789(bus, 5, 0, true, 170, 320, 35, 0, 35, 0);
 static JPEGDEC jpeg;
 static Preferences prefs;
 
@@ -23,6 +72,7 @@ ASSET(deepseek_offline_jpg);
 ASSET(gpt_jpg);
 ASSET(claude_jpg);
 ASSET(gemini_jpg);
+ASSET(color_bars_jpg);
 ASSET(x509_crt_bundle_bin);
 
 struct ImageAsset { const uint8_t *start; const uint8_t *end; };
@@ -31,6 +81,7 @@ static const ImageAsset images[] = {
   {claude_jpg_start, claude_jpg_end}, {gemini_jpg_start, gemini_jpg_end},
 };
 static const ImageAsset offlineImage = {deepseek_offline_jpg_start, deepseek_offline_jpg_end};
+static const ImageAsset colorBarsImage = {color_bars_jpg_start, color_bars_jpg_end};
 static const char *names[] = {"DeepSeek", "GPT", "Claude", "Gemini"};
 
 enum class AuthMode : uint8_t { None, ApiKey, Account };
@@ -43,9 +94,10 @@ static uint32_t pollIntervalMs = 30000;
 static uint32_t nextPoll = 0, retryNotBefore = 0, backoffMs = 30000;
 static uint32_t lastAnimation = 0, lastWifiTry = 0;
 static int64_t shownCents = 0, targetCents = 0;
-static bool hasBalance = false, isAnimating = false, needsDraw = true, demoMode = false;
+static bool hasBalance = false, isAnimating = false, needsDraw = true, demoMode = false, colorTestMode = false;
 static String serialLine;
 static int lastScrollPage = -1;
+static int jpegYOffset = 0;
 
 static bool reached(uint32_t deadline) { return int32_t(millis() - deadline) >= 0; }
 
@@ -72,17 +124,29 @@ static bool validIssuer(const String &value) {
 }
 
 static int jpegDraw(JPEGDRAW *draw) {
-  gfx->draw16bitRGBBitmap(draw->x, draw->y, draw->pPixels, draw->iWidth, draw->iHeight);
+  gfx->draw16bitRGBBitmap(draw->x, draw->y + jpegYOffset, draw->pPixels, draw->iWidth, draw->iHeight);
   return 1;
 }
 
-static void drawImage(const ImageAsset &asset) {
+static void drawImage(const ImageAsset &asset, int yOffset = 0) {
+  jpegYOffset = yOffset;
   const int length = int(asset.end - asset.start);
   if (jpeg.openFLASH(const_cast<uint8_t *>(asset.start), length, jpegDraw)) {
     jpeg.setPixelType(RGB565_LITTLE_ENDIAN);
     jpeg.decode(0, 0, 0);
     jpeg.close();
   }
+}
+
+static void drawColorTest() {
+  const uint16_t colors[] = {RED, GREEN, BLUE, WHITE, BLACK};
+  for (int i = 0; i < 5; ++i) gfx->fillRect(i * 64, 0, 64, 85, colors[i]);
+  drawImage(colorBarsImage, 85);
+  gfx->setTextColor(WHITE);
+  gfx->setTextSize(1);
+  gfx->setCursor(265, 5); gfx->print("GFX");
+  gfx->setCursor(265, 90); gfx->print("JPG");
+  needsDraw = false;
 }
 
 static String money(int64_t cents) {
@@ -274,7 +338,7 @@ static void handleCommand(String line) {
   line.trim();
   if (line == "help") {
     Serial.println("wifi SSID|PASSWORD  /  api API_KEY  /  account HTTPS_ISSUER|TOKEN");
-    Serial.println("next / refresh / interval SECONDS / status / demo / stop / clear");
+    Serial.println("next / refresh / interval SECONDS / status / demo / colors / stop / clear");
   } else if (line.startsWith("wifi ")) {
     String value = line.substring(5);
     const int sep = value.indexOf('|');
@@ -309,17 +373,23 @@ static void handleCommand(String line) {
     Serial.println("Account credential saved");
   } else if (line == "clear") {
     prefs.clear(); ssid = password = token = issuer = "";
-    authMode = AuthMode::None; hasBalance = false; demoMode = false;
+    authMode = AuthMode::None; hasBalance = false; demoMode = false; colorTestMode = false;
     WiFi.disconnect(true); linkState = LinkState::NeedWifi;
     Serial.println("Stored Wi-Fi and credentials cleared");
   } else if (line == "demo") {
+    colorTestMode = false;
     demoMode = true;
     hasBalance = true;
     isAnimating = false;
     shownCents = targetCents = 3862;
     linkState = LinkState::Ready;
     Serial.println("Demo only: 38.62; no balance request or charge");
+  } else if (line == "colors") {
+    colorTestMode = true;
+    demoMode = false;
+    Serial.println("Color test: top GFX, bottom JPEG; left to right R G B W K");
   } else if (line == "stop") {
+    colorTestMode = false;
     demoMode = false;
     hasBalance = false;
     linkState = ssid.isEmpty() ? LinkState::NeedWifi
@@ -340,7 +410,7 @@ static void handleCommand(String line) {
   } else if (line == "status") {
     Serial.printf("Wi-Fi: %s; auth: %s; character: %s; balance: %s\n",
                   WiFi.status() == WL_CONNECTED ? "connected" : "disconnected",
-                  demoMode ? "demo" : authMode == AuthMode::None ? "none" : authMode == AuthMode::ApiKey ? "API" : "account",
+                  colorTestMode ? "color test" : demoMode ? "demo" : authMode == AuthMode::None ? "none" : authMode == AuthMode::ApiKey ? "API" : "account",
                   names[character], hasBalance ? money(shownCents).c_str() : "unknown");
   } else if (!line.isEmpty()) Serial.println("Unknown command. Type help.");
   needsDraw = true;
@@ -402,6 +472,11 @@ void setup() {
 void loop() {
   readSerial();
   handleButtons();
+  if (colorTestMode) {
+    if (needsDraw) drawColorTest();
+    delay(10);
+    return;
+  }
   if (demoMode) {
     if (needsDraw) drawScreen();
     delay(10);

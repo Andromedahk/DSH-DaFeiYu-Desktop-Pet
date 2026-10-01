@@ -49,6 +49,20 @@ def main():
         montage.paste(tile, ((index % 2) * 320, (index // 2) * 170))
     montage.resize((1280, 680), Image.Resampling.NEAREST).save(preview_dir / "four-characters-demo.png")
 
+    colors = ((255, 0, 0), (0, 255, 0), (0, 0, 255), (255, 255, 255), (0, 0, 0))
+    bars = Image.new("RGB", (320, 85), "black")
+    bar_draw = ImageDraw.Draw(bars)
+    for index, color in enumerate(colors):
+        bar_draw.rectangle((index * 64, 0, index * 64 + 63, 84), fill=color)
+    bars.save(OUTPUT / "color-bars.jpg", "JPEG", quality=95, optimize=True,
+              progressive=False, subsampling=0)
+    comparison = Image.new("RGB", (320, 170), "black")
+    comparison.paste(bars, (0, 0))
+    comparison.paste(bars, (0, 85))
+    ImageDraw.Draw(comparison).text((265, 5), "GFX", fill="white", font=font)
+    ImageDraw.Draw(comparison).text((265, 90), "JPG", fill="white", font=font)
+    comparison.resize((960, 510), Image.Resampling.NEAREST).save(preview_dir / "color-bars-source.png")
+
 
 if __name__ == "__main__":
     main()
