@@ -26,6 +26,11 @@ def main():
         canvas = Image.new("RGB", (320, 170), (18, 23, 42))
         x = (320 - source.width) // 2
         canvas.paste(source, (x, (170 - source.height) // 2), source)
+        # The 1.9-inch LCD reads darker than the desktop preview. Lift shadows
+        # gently while keeping the tablet's pure black area black.
+        gamma = 0.85
+        lut = [round(255 * (value / 255) ** gamma) for value in range(256)]
+        canvas = canvas.point(lut * 3)
         output = OUTPUT / f"{name}.jpg"
         canvas.save(output, "JPEG", quality=78, optimize=True, progressive=False, subsampling=0)
         print(f"{source_name}: {output.stat().st_size:,} bytes -> {output.name}")

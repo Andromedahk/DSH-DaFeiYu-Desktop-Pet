@@ -1,6 +1,7 @@
 .DS_Store
 **/build/
 **/.pio/
+esp32-t-display-s3/factory-backups/
 **/dist/
 **/.build/
 **/ModuleCache/

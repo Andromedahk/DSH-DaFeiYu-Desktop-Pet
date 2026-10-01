@@ -43,7 +43,7 @@ static uint32_t pollIntervalMs = 30000;
 static uint32_t nextPoll = 0, retryNotBefore = 0, backoffMs = 30000;
 static uint32_t lastAnimation = 0, lastWifiTry = 0;
 static int64_t shownCents = 0, targetCents = 0;
-static bool hasBalance = false, isAnimating = false, needsDraw = true;
+static bool hasBalance = false, isAnimating = false, needsDraw = true, demoMode = false;
 static String serialLine;
 static int lastScrollPage = -1;
 
@@ -274,7 +274,7 @@ static void handleCommand(String line) {
   line.trim();
   if (line == "help") {
     Serial.println("wifi SSID|PASSWORD  /  api API_KEY  /  account HTTPS_ISSUER|TOKEN");
-    Serial.println("next / refresh / interval SECONDS / status / clear");
+    Serial.println("next / refresh / interval SECONDS / status / demo / stop / clear");
   } else if (line.startsWith("wifi ")) {
     String value = line.substring(5);
     const int sep = value.indexOf('|');
@@ -309,9 +309,23 @@ static void handleCommand(String line) {
     Serial.println("Account credential saved");
   } else if (line == "clear") {
     prefs.clear(); ssid = password = token = issuer = "";
-    authMode = AuthMode::None; hasBalance = false;
+    authMode = AuthMode::None; hasBalance = false; demoMode = false;
     WiFi.disconnect(true); linkState = LinkState::NeedWifi;
     Serial.println("Stored Wi-Fi and credentials cleared");
+  } else if (line == "demo") {
+    demoMode = true;
+    hasBalance = true;
+    isAnimating = false;
+    shownCents = targetCents = 3862;
+    linkState = LinkState::Ready;
+    Serial.println("Demo only: 38.62; no balance request or charge");
+  } else if (line == "stop") {
+    demoMode = false;
+    hasBalance = false;
+    linkState = ssid.isEmpty() ? LinkState::NeedWifi
+        : authMode == AuthMode::None ? LinkState::NeedKey : LinkState::Connecting;
+    nextPoll = millis();
+    Serial.println("Demo stopped");
   } else if (line == "next") {
     character = (character + 1) % 4; prefs.putUChar("character", character);
   } else if (line == "refresh") {
@@ -326,7 +340,7 @@ static void handleCommand(String line) {
   } else if (line == "status") {
     Serial.printf("Wi-Fi: %s; auth: %s; character: %s; balance: %s\n",
                   WiFi.status() == WL_CONNECTED ? "connected" : "disconnected",
-                  authMode == AuthMode::None ? "none" : authMode == AuthMode::ApiKey ? "API" : "account",
+                  demoMode ? "demo" : authMode == AuthMode::None ? "none" : authMode == AuthMode::ApiKey ? "API" : "account",
                   names[character], hasBalance ? money(shownCents).c_str() : "unknown");
   } else if (!line.isEmpty()) Serial.println("Unknown command. Type help.");
   needsDraw = true;
@@ -388,6 +402,11 @@ void setup() {
 void loop() {
   readSerial();
   handleButtons();
+  if (demoMode) {
+    if (needsDraw) drawScreen();
+    delay(10);
+    return;
+  }
   const uint32_t now = millis();
   if (ssid.isEmpty()) linkState = LinkState::NeedWifi;
   else if (WiFi.status() != WL_CONNECTED) {
