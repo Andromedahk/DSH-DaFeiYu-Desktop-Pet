@@ -172,7 +172,7 @@ enum Diagnostics {
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
 
         let side: CGFloat = 240
-        let frame = NSRect(origin: .zero, size: PetLayout.windowSize(side: side))
+        let frame = NSRect(origin: .zero, size: PetLayout.windowSize(side: side, character: character))
 
         func makeView(_ model: PetModel) -> PetView {
             let v = PetView(model: model, character: character)
@@ -219,7 +219,7 @@ enum Diagnostics {
         if render(v1, to: dir.appendingPathComponent(transparent), transparent: true) { written.append(transparent) }
         for preset in PetController.sizePresets {
             let sized = PetView(model: idle, character: character)
-            sized.frame = NSRect(origin: .zero, size: PetLayout.windowSize(side: preset.side))
+            sized.frame = NSRect(origin: .zero, size: PetLayout.windowSize(side: preset.side, character: character))
             let name = "size-\(Int(preset.side))pt.png"
             if render(sized, to: dir.appendingPathComponent(name)) { written.append(name) }
         }
@@ -229,7 +229,7 @@ enum Diagnostics {
             if render(makeView(model), to: dir.appendingPathComponent(name)) { written.append(name) }
             for preset in PetController.sizePresets {
                 let sized = PetView(model: model, character: character)
-                sized.frame = NSRect(origin: .zero, size: PetLayout.windowSize(side: preset.side))
+                sized.frame = NSRect(origin: .zero, size: PetLayout.windowSize(side: preset.side, character: character))
                 let sizeName = "size-\(Int(preset.side))pt-\(name)"
                 if render(sized, to: dir.appendingPathComponent(sizeName)) { written.append(sizeName) }
             }
@@ -241,7 +241,7 @@ enum Diagnostics {
         if render(makeView(stale), to: dir.appendingPathComponent(staleName)) { written.append(staleName) }
 
         let detail = makeView(idle)
-        detail.frame = NSRect(origin: .zero, size: PetLayout.windowSize(side: 640))
+        detail.frame = NSRect(origin: .zero, size: PetLayout.windowSize(side: 640, character: character))
         let detailName = "09-tablet-detail.png"
         if render(detail, to: dir.appendingPathComponent(detailName)) { written.append(detailName) }
 

@@ -19,8 +19,13 @@ final class PetController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var lastFrame: CFTimeInterval = CACurrentMediaTime()
     private var schedule = PollSchedule(interval: 30)
     private var statusAccum: Double = 0
+    private var bindingAccum: Double = 0
+    private var petHidden = false
+    private var hostVisible = true
+    private var nervousUntil: CFTimeInterval = 0
     private var wakeObserver: NSObjectProtocol?
     private var screenObserver: NSObjectProtocol?
+    private var activationObserver: NSObjectProtocol?
 
     private var statusBoxes: [ActionBox] = []
     private var popupBoxes: [ActionBox] = []
@@ -52,7 +57,8 @@ final class PetController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         view = PetView(model: model, character: state.character)
         view.controller = self
 
-        let content = NSRect(origin: .zero, size: PetLayout.windowSize(side: side))
+        let content = NSRect(origin: .zero,
+                             size: PetLayout.windowSize(side: side, character: state.character))
         window = PetWindow(contentRect: content,
                            styleMask: [.borderless],
                            backing: .buffered,
@@ -68,10 +74,18 @@ final class PetController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         window.alphaValue = 1.0
 
         model.setCredentialSource(credentialSourceLabel())
-        model.onHit = { [weak self] in self?.playHit() }
+        model.onHit = { [weak self] in
+            guard let self = self else { return }
+            // Nervous while the deduction animation runs, then one more second.
+            self.nervousUntil = CACurrentMediaTime() + self.model.hitDuration + PetExpressionPolicy.holdAfterHit
+            self.playHit()
+        }
 
         placeWindow()
-        window.orderFrontRegardless()
+        // Decide visibility before the first paint so a pet bound to a closed
+        // dsh-desktop window never flashes on screen at launch.
+        applyWindowBinding(state.followDSHWindow ? DSHWindowWatcher.presence() : .visible)
+        if !petHidden { window.orderFrontRegardless() }
 
         buildStatusItem()
         startTick()
@@ -85,6 +99,9 @@ final class PetController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         screenObserver = NotificationCenter.default.addObserver(
             forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main
         ) { [weak self] _ in self?.keepWindowVisible() }
+        activationObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
+        ) { [weak self] _ in self?.refreshExpression() }
 
         let f = window.frame
         Log.write(String(format: "started: size=%.0fpt frame=(%.0f,%.0f %.0fx%.0f) screen=%@ credential=%@",
@@ -102,6 +119,7 @@ final class PetController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         tickTimer?.invalidate()
         if let observer = wakeObserver { NSWorkspace.shared.notificationCenter.removeObserver(observer) }
+        if let observer = activationObserver { NSWorkspace.shared.notificationCenter.removeObserver(observer) }
         if let observer = screenObserver { NotificationCenter.default.removeObserver(observer) }
         state.windowOrigin = window?.frame.origin
         state.save()
@@ -122,8 +140,19 @@ final class PetController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func isOnScreen(origin: NSPoint, size: NSSize) -> Bool {
-        let frame = NSRect(origin: origin, size: size)
-        return NSScreen.screens.contains { $0.visibleFrame.contains(frame) }
+        // The snap position overhangs the visible frame by the artwork inset,
+        // so probe the part of the frame that has to stay on screen.
+        let slack = min(snappedBottomInset(for: size), size.height - 1)
+        let probe = NSRect(x: origin.x, y: origin.y + slack,
+                           width: size.width, height: size.height - slack)
+        return NSScreen.screens.contains { $0.visibleFrame.contains(probe) }
+    }
+
+    /// How far below the visible frame's bottom edge the window frame starts so
+    /// that the drawn artwork touches the screen edge.
+    private func snappedBottomInset(for size: NSSize) -> CGFloat {
+        PetLayout.artworkBottomInset(in: NSRect(origin: .zero, size: size),
+                                     character: state.character)
     }
 
     private func keepWindowVisible() {
@@ -139,13 +168,25 @@ final class PetController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func snapToCorner(animated: Bool, on screen: NSScreen? = nil) {
         guard let target = screen ?? window.screen ?? NSScreen.main else { return }
         let vf = target.visibleFrame
-        let origin = NSPoint(x: vf.minX + 14, y: vf.minY + 14)
+        let size = window.frame.size
+        // Left keeps its 14pt of air; the bottom goes flush with the screen
+        // edge, which starts the frame lower than `visibleFrame.minY` by the
+        // artwork's own inset.
+        let origin = NSPoint(x: vf.minX + 14, y: vf.minY - snappedBottomInset(for: size))
+        let targetFrame = NSRect(origin: origin, size: size)
         if animated {
-            NSAnimationContext.runAnimationGroup { ctx in
+            // NSWindow's animator proxy has no animatable `frameOrigin`, so
+            // `animator().setFrameOrigin(_:)` is silently ignored and the pet
+            // never moves. Animate the whole frame, then pin the origin in case
+            // the animation is interrupted (menu tracking, display changes).
+            NSAnimationContext.runAnimationGroup({ ctx in
                 ctx.duration = 0.16
                 ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
-                window.animator().setFrameOrigin(origin)
-            }
+                window.animator().setFrame(targetFrame, display: true)
+            }, completionHandler: { [weak self] in
+                guard let self = self, let window = self.window else { return }
+                if window.frame != targetFrame { window.setFrame(targetFrame, display: true) }
+            })
         } else {
             window.setFrameOrigin(origin)
         }
@@ -156,6 +197,45 @@ final class PetController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         state.windowOrigin = window.frame.origin
         if state.snapOnRelease { snapToCorner(animated: true) }
         state.save()
+    }
+
+    // MARK: - dsh-desktop window binding
+
+    /// The pet is shown only while the host desktop window is on screen. Losing
+    /// focus is not "gone": a window that is still visible keeps the pet where
+    /// it is, so only minimise, close, quit or another Space hides it.
+    func applyWindowBinding(_ presence: DSHWindowWatcher.Presence) {
+        hostVisible = presence == .visible
+        // Unknown must never hide the pet, and a disabled binding keeps it up.
+        setPetHidden(state.followDSHWindow && presence == .hidden)
+    }
+
+    private func refreshWindowBinding() {
+        applyWindowBinding(DSHWindowWatcher.presence())
+    }
+
+    /// Happy normally, angry while the host window is visible but not focused,
+    /// nervous for the deduction animation plus one second.
+    private func refreshExpression() {
+        view.expression = PetExpressionPolicy.expression(
+            now: CACurrentMediaTime(),
+            nervousUntil: nervousUntil,
+            hostVisible: hostVisible,
+            hostForeground: DSHWindowWatcher.isHostForeground()
+        )
+    }
+
+    private func setPetHidden(_ hidden: Bool) {
+        guard hidden != petHidden else { return }
+        petHidden = hidden
+        if hidden {
+            window.orderOut(nil)
+            Log.write("pet hidden: no dsh-desktop window on screen")
+        } else {
+            window.orderFrontRegardless()
+            Log.write("pet shown: dsh-desktop window is back")
+        }
+        writeStatus()
     }
 
     // MARK: - Tick
@@ -194,17 +274,24 @@ final class PetController: NSObject, NSApplicationDelegate, NSMenuDelegate {
             statusAccum = 0
             writeStatus()
         }
+        bindingAccum += dt
+        if bindingAccum >= 0.5 {
+            bindingAccum = 0
+            refreshWindowBinding()
+        }
+        refreshExpression()
     }
 
     /// Publish a small liveness/geometry snapshot so the pet can be inspected
     /// from another process without screen-recording permission.
-    private func writeStatus(running: Bool = true) {
+    func writeStatus(running: Bool = true) {
         let f = window.frame
         let obj: [String: Any] = [
             "running": running,
             "pid": Int(ProcessInfo.processInfo.processIdentifier),
             "character": view.character.rawValue,
             "characterName": view.character.displayName,
+            "expression": view.expression.rawValue,
             "connected": model.connected,
             "display": model.displayString,
             "real": model.realString,
@@ -281,7 +368,9 @@ final class PetController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     // MARK: - Sound
 
     private func playHit() {
-        guard state.soundOn, let url = PetPaths.soundURL else { return }
+        // A hidden pet must stay silent; the balance change is replayed when the
+        // next poll snaps the readout anyway.
+        guard state.soundOn, !petHidden, let url = PetPaths.soundURL else { return }
         // All players and indexes are owned by the main thread.
         if soundPlayers.isEmpty {
             for _ in 0..<4 {
@@ -329,6 +418,11 @@ final class PetController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         if let spent = model.spentCny {
             let s = NSMenuItem(title: String(format: "累计消费 ¥%.2f", spent), action: nil, keyEquivalent: "")
+            s.isEnabled = false
+            menu.addItem(s)
+        }
+        if petHidden {
+            let s = NSMenuItem(title: "桌宠已隐藏 · 等待 DSH 窗口", action: nil, keyEquivalent: "")
             s.isEnabled = false
             menu.addItem(s)
         }
@@ -388,6 +482,12 @@ final class PetController: NSObject, NSApplicationDelegate, NSMenuDelegate {
             guard let self = self else { return }
             self.state.snapOnRelease.toggle()
             self.state.save()
+        })
+        menu.addItem(item(state.followDSHWindow ? "✓ 跟随 DSH 窗口显示" : "　跟随 DSH 窗口显示") { [weak self] in
+            guard let self = self else { return }
+            self.state.followDSHWindow.toggle()
+            self.state.save()
+            self.refreshWindowBinding()
         })
         menu.addItem(item(state.soundOn ? "✓ 音效" : "　音效") { [weak self] in
             guard let self = self else { return }
@@ -489,8 +589,17 @@ final class PetController: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func setCharacter(_ character: PetCharacter) {
         guard character != state.character, PetAssets.sprite(for: character) != nil else { return }
+        let previousAspect = state.character.aspectRatio
         state.character = character
         view.setCharacter(character)
+        // Characters ship different canvas aspects, so keep the body height and
+        // the anchored bottom-left corner while the window widens or narrows.
+        if abs(character.aspectRatio - previousAspect) > 0.0001 {
+            let size = PetLayout.windowSize(side: side, character: character)
+            window.setFrame(NSRect(origin: window.frame.origin, size: size), display: true)
+            keepWindowVisible()
+            state.windowOrigin = window.frame.origin
+        }
         // Switching artwork leaves the balance model, queued animations, polling,
         // position and size intact. The next pointer tick uses the new alpha mask.
         state.save()
@@ -499,7 +608,7 @@ final class PetController: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func setSize(index: Int) {
         state.sizeIndex = min(max(index, 0), Self.sizePresets.count - 1)
-        let newSize = PetLayout.windowSize(side: side)
+        let newSize = PetLayout.windowSize(side: side, character: state.character)
         let origin = window.frame.origin
         window.setFrame(NSRect(origin: origin, size: newSize), display: true)
         keepWindowVisible()

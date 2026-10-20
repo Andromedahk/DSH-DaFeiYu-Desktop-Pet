@@ -328,6 +328,7 @@ struct PetState {
     var character: PetCharacter = .deepseek
     var sizeIndex: Int = 1          // index into PetController.sizePresets
     var snapOnRelease: Bool = true
+    var followDSHWindow: Bool = true
     var soundOn: Bool = true
     var pollSeconds: Double = 30
     var windowOrigin: CGPoint?
@@ -341,6 +342,7 @@ struct PetState {
         }
         if let v = obj["sizeIndex"] as? Int, (0...3).contains(v) { s.sizeIndex = v }
         if let v = obj["snapOnRelease"] as? Bool { s.snapOnRelease = v }
+        if let v = obj["followDSHWindow"] as? Bool { s.followDSHWindow = v }
         if let v = obj["soundOn"] as? Bool { s.soundOn = v }
         if let v = obj["pollSeconds"] as? Double, v.isFinite { s.pollSeconds = min(300, max(10, v)) }
         if let x = obj["originX"] as? Double, let y = obj["originY"] as? Double, x.isFinite, y.isFinite {
@@ -354,6 +356,7 @@ struct PetState {
             "character": character.rawValue,
             "sizeIndex": min(3, max(0, sizeIndex)),
             "snapOnRelease": snapOnRelease,
+            "followDSHWindow": followDSHWindow,
             "soundOn": soundOn,
             "pollSeconds": pollSeconds.isFinite ? min(300, max(10, pollSeconds)) : 30,
         ]

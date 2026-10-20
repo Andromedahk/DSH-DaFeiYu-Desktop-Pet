@@ -9,8 +9,18 @@ final class PetView: NSView {
 
     var showsOfflineArtwork: Bool { character == .deepseek && !model.connected }
 
+    /// Only the blue pet ships several faces; other characters ignore this.
+    var expression: PetExpression = .happy {
+        didSet {
+            guard expression != oldValue else { return }
+            needsDisplay = true
+        }
+    }
+
     private var activeSprite: PetAssets.Sprite? {
-        showsOfflineArtwork ? PetAssets.deepseekOffline : PetAssets.sprite(for: character)
+        showsOfflineArtwork
+            ? PetAssets.deepseekOffline
+            : PetAssets.sprite(for: character, expression: expression)
     }
 
     private var dragStartMouse: NSPoint = .zero
@@ -21,7 +31,8 @@ final class PetView: NSView {
     init(model: PetModel, character: PetCharacter = .deepseek) {
         self.model = model
         self.character = character
-        super.init(frame: NSRect(origin: .zero, size: PetLayout.windowSize(side: 150)))
+        super.init(frame: NSRect(origin: .zero,
+                                 size: PetLayout.windowSize(side: 150, character: character)))
         setAccessibilityElement(true)
         setAccessibilityRole(.image)
         setAccessibilityLabel("DSH 余额桌宠 · \(character.displayName)")
@@ -42,8 +53,15 @@ final class PetView: NSView {
 
     /// A small inset keeps the original art, including its outermost pixels,
     /// inside the window even at the peak of the hurt shake.
-    private var side: CGFloat { PetLayout.bodyHeight(in: bounds) }
-    private var spriteRect: CGRect { PetLayout.spriteRect(in: bounds) }
+    private var side: CGFloat { PetLayout.bodyHeight(in: bounds, character: character) }
+    private var spriteRect: CGRect { PetLayout.spriteRect(in: bounds, character: character) }
+
+    /// Where the active artwork is actually drawn: the sprite rect when the
+    /// artwork matches the character's canvas, a centred fit otherwise.
+    private var imageRect: CGRect {
+        guard let size = activeSprite?.size else { return spriteRect }
+        return PetLayout.contentRect(for: size, in: spriteRect)
+    }
 
     private var shakeOffset: CGPoint {
         guard model.shakeTime > 0 else { return .zero }
@@ -61,7 +79,7 @@ final class PetView: NSView {
         guard bounds.contains(point), point.y < bounds.minY + side else { return false }
         let offset = shakeOffset
         let local = CGPoint(x: point.x - offset.x, y: point.y - offset.y)
-        let rect = spriteRect
+        let rect = imageRect
         guard rect.contains(local) else { return false }
         guard let sprite = activeSprite else { return true }
         return sprite.isOpaque(at: CGPoint(x: (local.x - rect.minX) / rect.width,
@@ -119,7 +137,7 @@ final class PetView: NSView {
 
         if model.topupTime > 0 {
             let progress = 1 - CGFloat(model.topupTime / 0.9)
-            let rect = spriteRect.insetBy(dx: side * (0.03 + 0.06 * (1 - progress)),
+            let rect = imageRect.insetBy(dx: side * (0.03 + 0.06 * (1 - progress)),
                                          dy: side * (0.03 + 0.06 * (1 - progress)))
             ctx.setStrokeColor(NSColor.systemGreen.withAlphaComponent(0.8 * (1 - progress)).cgColor)
             ctx.setLineWidth(side * 0.015)
@@ -129,7 +147,7 @@ final class PetView: NSView {
         if let sprite = activeSprite {
             ctx.interpolationQuality = .high
             ctx.beginTransparencyLayer(auxiliaryInfo: nil)
-            ctx.draw(sprite.image, in: spriteRect)
+            ctx.draw(sprite.image, in: imageRect)
             if model.impact > 0 {
                 // sourceAtop preserves the supplied sprite's alpha, including
                 // its soft edge, instead of filling its transparent background.
@@ -137,7 +155,7 @@ final class PetView: NSView {
                 ctx.setBlendMode(.sourceAtop)
                 ctx.setFillColor(NSColor(srgbRed: 1, green: 0.10, blue: 0.14,
                                          alpha: 0.45 * model.impact).cgColor)
-                ctx.fill(spriteRect)
+                ctx.fill(imageRect)
                 ctx.restoreGState()
             }
             ctx.endTransparencyLayer()
@@ -163,7 +181,7 @@ final class PetView: NSView {
         let panelWidth = PetLayout.tabletBounds.width
         let panelHeight = PetLayout.tabletBounds.height
         ctx.saveGState()
-        ctx.concatenate(PetLayout.tabletTransform(in: bounds, character: character))
+        ctx.concatenate(PetLayout.tabletTransform(in: bounds, character: character, expression: expression))
         ctx.clip(to: PetLayout.tabletBounds)
         ctx.setShadow(offset: CGSize(width: 1.5, height: -1.5), blur: 1.5,
                       color: NSColor.black.withAlphaComponent(0.65).cgColor)

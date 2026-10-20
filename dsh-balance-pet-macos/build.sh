@@ -40,8 +40,9 @@ else
   compile "$ARCH" "$APP/Contents/MacOS/$NAME"
 fi
 
-echo "==> copying four characters and original sound"
-for sprite in sprite.png sprite-gpt.png sprite-claude.png sprite-gemini.png sprite-deepseek-offline.png; do
+echo "==> copying characters, expressions and original sound"
+for sprite in expression_happy.png expression_angry.png expression_nervous.png \
+              sprite-gpt.png sprite-claude.png sprite-gemini.png sprite-deepseek-offline.png; do
   cp "$ROOT/Resources/$sprite" "$APP/Contents/Resources/$sprite"
 done
 cp "$ROOT/Resources/hit.mp3" "$APP/Contents/Resources/hit.mp3"

@@ -112,10 +112,10 @@ BIN='./dist/DSH大肥鱼桌宠.app/Contents/MacOS/DSHBalancePet'
 - `BalanceClient.swift`：请求、严格响应解析与精确金额。
 - `PetModel.swift`：余额和动画；`PollSchedule.swift`：请求调度。
 - `PetController.swift`：窗口、菜单、轮询与音效。
-- `PetCharacter.swift`：四个内置角色的名称、图片与各自平板坐标。
-- `PetView.swift` / `PetAssets.swift` / `PetLayout.swift`：角色切换绘制、等比缩放和透明区域交互。
+- `PetCharacter.swift`：四个内置角色的名称、图片、各自平板坐标与表情枚举。
+- `PetView.swift` / `PetAssets.swift` / `PetLayout.swift`：角色与表情切换绘制、按立绘比例缩放和透明区域交互。
 - `Diagnostics.swift` / `*SelfTests.swift`：离线回归与诊断。
-- `Resources/`：四张角色 PNG，以及从 Windows 原版逐字节复制的 `hit.mp3`。
+- `Resources/`：蓝色大肥鱼的三张 1024 × 1024 表情立绘、其余三张 1536 × 1024 角色 PNG、抱盆图，以及从 Windows 原版逐字节复制的 `hit.mp3`。
 - `artwork/left-completion-v1/`：补全图片、参考、提示词与原始素材检查记录。
 
 上游原始代码及素材完整保存在仓库的 `原版（Windows版）`，来源见 [素材说明](Resources/README.md)。旧音效生成脚本保留供参考，默认构建不再使用。
@@ -124,4 +124,4 @@ BIN='./dist/DSH大肥鱼桌宠.app/Contents/MacOS/DSHBalancePet'
 
 ## 更新记录
 
-版本变更统一记录在[仓库首页的更新记录](../README.md#更新记录)，包括 v1.3.1 离线抱盆状态和 v1.3.0 四角色切换。
+版本变更统一记录在[仓库首页的更新记录](../README.md#更新记录)，包括 v1.5.0 表情立绘、v1.4.0 跟随 DSH 窗口显示、v1.3.2 吸附左下角修复、v1.3.1 离线抱盆状态和 v1.3.0 四角色切换。

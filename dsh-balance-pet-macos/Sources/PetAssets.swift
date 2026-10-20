@@ -31,6 +31,8 @@ enum PetAssets {
             self.bitmap = bitmap
         }
 
+        var size: CGSize { CGSize(width: image.width, height: image.height) }
+
         /// Normalized position measured from the lower-left, like an NSView.
         /// Bitmap pixels use the opposite vertical direction.
         func isOpaque(at point: CGPoint) -> Bool {
@@ -41,15 +43,20 @@ enum PetAssets {
         }
     }
 
-    private static let sprites: [PetCharacter: Sprite] = {
-        var result: [PetCharacter: Sprite] = [:]
+    private static let sprites: [PetCharacter: [PetExpression: Sprite]] = {
+        var result: [PetCharacter: [PetExpression: Sprite]] = [:]
         for character in PetCharacter.allCases {
-            guard let url = resourceURL(named: character.resourceName),
-                  let sprite = Sprite(url: url) else {
-                Log.write("\(character.resourceName) is missing or unreadable")
-                continue
+            let expressions = character.expressions.isEmpty ? [PetExpression.happy] : character.expressions
+            var loaded: [PetExpression: Sprite] = [:]
+            for expression in expressions {
+                let name = character.resourceName(for: expression)
+                guard let url = resourceURL(named: name), let sprite = Sprite(url: url) else {
+                    Log.write("\(name) is missing or unreadable")
+                    continue
+                }
+                loaded[expression] = sprite
             }
-            result[character] = sprite
+            result[character] = loaded
         }
         return result
     }()
@@ -63,5 +70,10 @@ enum PetAssets {
         return sprite
     }()
 
-    static func sprite(for character: PetCharacter) -> Sprite? { sprites[character] }
+    /// Falls back to the neutral face when a single expression is missing, so a
+    /// partial install still shows a pet instead of an empty window.
+    static func sprite(for character: PetCharacter, expression: PetExpression = .happy) -> Sprite? {
+        guard let set = sprites[character] else { return nil }
+        return set[expression] ?? set[.happy] ?? set.values.first
+    }
 }
